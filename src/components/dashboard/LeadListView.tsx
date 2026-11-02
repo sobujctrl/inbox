@@ -17,7 +17,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { Lead, LeadSource, LeadStatus } from '../../types/lead';
-import { FirestoreErrorPayload } from '../../services/leadService';
+import { FirestoreErrorPayload, FirestoreDebugInfo } from '../../services/leadService';
 import { SourceBadge, FacebookIcon, MessengerIcon, WhatsAppIcon, ManualIcon } from '../common/SourceBadge';
 import { StatusBadge } from '../common/StatusBadge';
 import { ChannelBadge, resolveMessageChannel } from '../common/ChannelBadge';
@@ -47,6 +47,7 @@ interface LeadListViewProps {
   onToggleFollowUpFilter: () => void;
   firestoreError?: FirestoreErrorPayload | null;
   onRetryFirestore?: () => void;
+  firestoreDebug?: FirestoreDebugInfo | null;
 }
 
 export const LeadListView: React.FC<LeadListViewProps> = ({
@@ -63,6 +64,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
   onToggleFollowUpFilter,
   firestoreError,
   onRetryFirestore,
+  firestoreDebug,
 }) => {
   const [viewMode, setViewMode] = useState<'table' | 'card'>('table');
   const [statusFilter, setStatusFilter] = useState<'all' | LeadStatus>('all');
@@ -148,20 +150,21 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
     .filter((lead) => {
       // 1. Source Tab
       if (sourceFilter !== 'all') {
-        const matchesSource = lead.sources.includes(sourceFilter as LeadSource) || lead.source === sourceFilter;
+        const sources = Array.isArray(lead.sources) && lead.sources.length > 0 ? lead.sources : [lead.source || 'facebook'];
+        const matchesSource = sources.includes(sourceFilter as LeadSource) || lead.source === sourceFilter;
         if (!matchesSource) return false;
       }
 
       // 2. Search Query (name or phone or messengerId or product)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
-        const nameMatch = lead.name.toLowerCase().includes(q);
+        const nameMatch = (lead.name || '').toLowerCase().includes(q);
         const phoneMatch = Boolean(
-          (lead.phone && lead.phone.includes(q)) ||
-          (lead.originalPhone && lead.originalPhone.includes(q))
+          (lead.phone && String(lead.phone).includes(q)) ||
+          (lead.originalPhone && String(lead.originalPhone).includes(q))
         );
-        const messengerMatch = Boolean(lead.messengerId && lead.messengerId.toLowerCase().includes(q));
-        const productMatch = lead.productInterest.toLowerCase().includes(q);
+        const messengerMatch = Boolean(lead.messengerId && String(lead.messengerId).toLowerCase().includes(q));
+        const productMatch = (lead.productInterest || '').toLowerCase().includes(q);
         if (!nameMatch && !phoneMatch && !messengerMatch && !productMatch) return false;
       }
 
@@ -172,8 +175,9 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
       }
 
       // 4. Tag Filter
-      if (tagFilter !== 'all' && !lead.tags.includes(tagFilter)) {
-        return false;
+      if (tagFilter !== 'all') {
+        const tags = Array.isArray(lead.tags) ? lead.tags : [];
+        if (!tags.includes(tagFilter)) return false;
       }
 
       // 5. Assigned Filter
@@ -187,7 +191,8 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
 
       // 6. Follow-up Filter
       if (isFollowUpFilterActive) {
-        const followUpVal = lead.followUpDate || lead.nextFollowUpDate;
+        const rawFollowUp = lead.followUpDate || lead.nextFollowUpDate;
+        const followUpVal = typeof rawFollowUp === 'string' ? rawFollowUp : '';
         if (!followUpVal || !followUpVal.startsWith(today)) {
           return false;
         }
@@ -208,17 +213,17 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
     })
     .sort((a, b) => {
       if (sortBy === 'newest') {
-        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime();
-        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime();
+        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime() || 0;
+        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime() || 0;
         return timeB - timeA;
       }
       if (sortBy === 'oldest') {
-        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime();
-        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime();
+        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime() || 0;
+        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime() || 0;
         return timeA - timeB;
       }
       if (sortBy === 'name') {
-        return a.name.localeCompare(b.name, 'bn');
+        return (a.name || '').localeCompare(b.name || '', 'bn');
       }
       if (sortBy === 'value') {
         return (b.estimatedValue || 0) - (a.estimatedValue || 0);
@@ -518,24 +523,93 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
         )}
       </div>
 
-      {/* Requirement 4: Firestore Error Alert Banner in Inbox */}
-      {firestoreError && (
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl border border-rose-300 bg-rose-50 p-4 dark:border-rose-900/60 dark:bg-rose-950/40 text-rose-900 dark:text-rose-200 shadow-xs">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
-            <div>
-              <h4 className="text-xs font-bold">Firestore থেকে ডেটা লোড করতে সমস্যা হয়েছে [{firestoreError.code}]</h4>
-              <p className="text-xs mt-0.5 text-rose-700 dark:text-rose-300 leading-relaxed">{firestoreError.details}</p>
+      {/* Requirement 4: Real-time Debug Line & Status when document count is 0 or error occurs */}
+      {(firestoreError || leads.length === 0) && (
+        <div className="rounded-xl border border-amber-300/80 bg-amber-50/95 p-3.5 text-xs text-amber-950 shadow-xs dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200/60 pb-2 dark:border-amber-900/60">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-200/90 px-2 py-0.5 font-mono text-[11px] font-bold text-amber-900 dark:bg-amber-900/80 dark:text-amber-100">
+                <span className="h-2 w-2 rounded-full bg-amber-600 animate-pulse"></span>
+                Firestore ডায়াগনস্টিক তথ্য (Debug Trace)
+              </span>
+              <span className="text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                {firestoreError ? 'কানেকশন ত্রুটি' : (leads.length === 0 ? '০ লিড ডিবাগিং' : 'কানেকশন সক্রিয়')}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[11px]">
+              {firestoreDebug?.lastUpdated && (
+                <span className="text-slate-500 dark:text-slate-400">
+                  আপডেট: {firestoreDebug.lastUpdated}
+                </span>
+              )}
+              {onRetryFirestore && (
+                <button
+                  onClick={onRetryFirestore}
+                  className="rounded bg-amber-200 hover:bg-amber-300 px-2.5 py-1 text-[11px] font-bold text-amber-900 shadow-2xs transition dark:bg-amber-800 dark:hover:bg-amber-700 dark:text-amber-100"
+                >
+                  পুনরায় লোড
+                </button>
+              )}
             </div>
           </div>
-          {onRetryFirestore && (
-            <button
-              onClick={onRetryFirestore}
-              className="shrink-0 rounded-lg bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 text-xs font-semibold shadow-xs transition"
-            >
-              পুনরায় চেষ্টা করুন
-            </button>
-          )}
+
+          {/* The 4 explicit debug fields requested in requirement 4 */}
+          <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 font-mono text-[11px]">
+            <div className="rounded-lg bg-white/90 p-2.5 border border-amber-200/60 dark:bg-slate-900/70 dark:border-amber-900/40">
+              <span className="text-[10px] uppercase font-sans font-bold text-slate-500 dark:text-slate-400 block">
+                ১. ইউজার আইডি (UID):
+              </span>
+              <span className="font-bold select-all break-all text-slate-900 dark:text-slate-100">
+                {firestoreDebug?.uid || 'লগইন করা নেই'}
+              </span>
+            </div>
+
+            <div className="rounded-lg bg-white/90 p-2.5 border border-amber-200/60 dark:bg-slate-900/70 dark:border-amber-900/40">
+              <span className="text-[10px] uppercase font-sans font-bold text-slate-500 dark:text-slate-400 block">
+                ২. কালেকশন পাথ (Path):
+              </span>
+              <span className="font-bold select-all break-all text-blue-700 dark:text-blue-300">
+                {firestoreDebug?.path || 'users/{uid}/leads'}
+              </span>
+            </div>
+
+            <div className="rounded-lg bg-white/90 p-2.5 border border-amber-200/60 dark:bg-slate-900/70 dark:border-amber-900/40">
+              <span className="text-[10px] uppercase font-sans font-bold text-slate-500 dark:text-slate-400 block">
+                ৩. প্রাপ্ত ডকুমেন্ট সংখ্যা (Count):
+              </span>
+              <span className={`font-bold ${leads.length > 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}`}>
+                {toBengaliNumerals(firestoreDebug?.docCount ?? leads.length)} টি ({firestoreDebug?.docCount ?? leads.length} docs)
+              </span>
+            </div>
+
+            <div className="rounded-lg bg-white/90 p-2.5 border border-amber-200/60 dark:bg-slate-900/70 dark:border-amber-900/40">
+              <span className="text-[10px] uppercase font-sans font-bold text-slate-500 dark:text-slate-400 block">
+                ৪. ডেটাবেস ও এরর স্ট্যাটাস:
+              </span>
+              <span className="font-bold break-all">
+                {firestoreError || firestoreDebug?.errorMessage ? (
+                  <span className="text-rose-600 dark:text-rose-400">
+                    ত্রুটি: [{firestoreError?.code || firestoreDebug?.errorCode}] {firestoreError?.details || firestoreDebug?.errorMessage}
+                  </span>
+                ) : (
+                  <span className="text-emerald-700 dark:text-emerald-400">
+                    কোনো ত্রুটি নেই ({firestoreDebug?.databaseId || 'সংযুক্ত'})
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+
+          {/* Note for n8n */}
+          <div className="mt-2.5 text-[11px] text-amber-900 dark:text-amber-200 flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-amber-200/40 dark:border-amber-900/40">
+            <span>
+              💡 Firestore ডেটাবেস: <strong className="font-mono">{firestoreDebug?.databaseId || 'ai-studio-unifiedleadinbox-0b829395-84c1-4d8f-be98-a6a6c0d8634d'}</strong> | কালেকশন পাথ: <strong className="font-mono">{firestoreDebug?.path || 'users/{uid}/leads'}</strong>
+            </span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/70 px-2 py-0.5 rounded">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+              ডেটাবেস সক্রিয়
+            </span>
+          </div>
         </div>
       )}
 

@@ -13,7 +13,18 @@ import { Lead, LeadActivity, LeadNote, LeadSource, LeadStatus } from '../types/l
 import { INITIAL_DEMO_LEADS } from '../data/demoLeads';
 import { normalizeBdPhoneNumber, formatBdPhoneNumber } from '../utils/phone';
 import { SOURCE_LABELS, STATUS_LABELS } from '../utils/formatters';
-import { initializeFirebaseInstances, isFirebaseConfigured } from '../firebase/config';
+import { initializeFirebaseInstances, isFirebaseConfigured, getActiveDatabaseId, getSavedFirebaseConfig, saveFirebaseConfig } from '../firebase/config';
+
+export interface FirestoreDebugInfo {
+  uid: string;
+  databaseId: string;
+  path: string;
+  docCount: number;
+  status: 'connected' | 'error' | 'loading';
+  errorCode?: string;
+  errorMessage?: string;
+  lastUpdated: string;
+}
 
 const STORAGE_KEY = 'unified_lead_inbox_leads_v1';
 const FIRESTORE_CACHE_KEY = 'unified_lead_inbox_firestore_v2';
@@ -68,6 +79,291 @@ export interface FirestoreErrorPayload {
   details: string;
 }
 
+/**
+ * Safely parse any date value (Firestore Timestamp, ISO string, epoch number, numeric string)
+ * into a valid ISO 8601 string.
+ */
+export function safeToIsoString(val: any, fallback?: string): string {
+  const fallbackVal = fallback || new Date().toISOString();
+  if (val === null || val === undefined || val === '') return fallbackVal;
+
+  // Firestore Timestamp object: has .toDate() function
+  if (typeof val === 'object') {
+    if (typeof val.toDate === 'function') {
+      try {
+        const d = val.toDate();
+        if (d instanceof Date && !isNaN(d.getTime())) {
+          return d.toISOString();
+        }
+      } catch {}
+    }
+    // Firestore Timestamp representation: { seconds: number, nanoseconds?: number } or { _seconds: number }
+    const secs = val.seconds ?? val._seconds;
+    if (typeof secs === 'number' && !isNaN(secs)) {
+      try {
+        const d = new Date(secs * 1000);
+        if (!isNaN(d.getTime())) {
+          return d.toISOString();
+        }
+      } catch {}
+    }
+  }
+
+  // Number: epoch timestamp (seconds or milliseconds)
+  if (typeof val === 'number' && !isNaN(val)) {
+    if (val < 1e11) {
+      return new Date(val * 1000).toISOString();
+    }
+    return new Date(val).toISOString();
+  }
+
+  // String: ISO, YYYY-MM-DD, or numeric string
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (!trimmed) return fallbackVal;
+    if (/^\d+$/.test(trimmed)) {
+      const num = Number(trimmed);
+      return safeToIsoString(num, fallbackVal);
+    }
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString();
+    }
+  }
+
+  return fallbackVal;
+}
+
+/**
+ * Normalizes any raw source into a valid LeadSource ('facebook' | 'messenger' | 'whatsapp' | 'manual')
+ */
+export function normalizeLeadSource(src?: any, hasMessengerId?: boolean): LeadSource {
+  if (!src) return hasMessengerId ? 'messenger' : 'facebook';
+  const s = String(src).toLowerCase().trim();
+  if (s.includes('messenger') || s === 'msg' || s === 'chat') return 'messenger';
+  if (s.includes('whatsapp') || s === 'wa') return 'whatsapp';
+  if (s.includes('manual') || s === 'offline') return 'manual';
+  if (s.includes('face') || s.includes('fb') || s.includes('meta') || s.includes('comment')) return 'facebook';
+  return hasMessengerId ? 'messenger' : 'facebook';
+}
+
+/**
+ * Normalizes any status into a valid LeadStatus ('new' | 'contacted' | 'followup' | 'won' | 'lost')
+ */
+export function normalizeLeadStatus(st?: any): LeadStatus {
+  if (!st) return 'new';
+  const s = String(st).toLowerCase().trim();
+  if (s === 'contacted' || s === 'contact' || s === 'যোগাযোগ করা হয়েছে') return 'contacted';
+  if (s === 'followup' || s === 'follow_up' || s === 'follow-up' || s === 'ফলোআপ' || s === 'pending') return 'followup';
+  if (s === 'won' || s === 'closed_won' || s === 'সফল') return 'won';
+  if (s === 'lost' || s === 'closed_lost' || s === 'ব্যর্থ') return 'lost';
+  return 'new'; // 'new', 'NEW', 'New', 'open', 'unread', etc. default to 'new'
+}
+
+/**
+ * Normalizes raw document data from Firestore / n8n into a fully-typed, robust Lead object.
+ * Applies comprehensive defaults for all omitted or optional fields.
+ */
+export function normalizeFirestoreLead(docId: string, rawData: any): Lead {
+  const raw = rawData || {};
+  const docKey = docId || String(raw.id || `lead-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+
+  // Messenger ID (handle integer, string, psid, sender_id)
+  const rawMessengerId = raw.messengerId ?? raw.messenger_id ?? raw.psid ?? raw.sender_id ?? raw.senderId ?? null;
+  const messengerId = rawMessengerId !== null && rawMessengerId !== undefined && String(rawMessengerId).trim() !== ''
+    ? String(rawMessengerId).trim()
+    : undefined;
+
+  // Phone (handle number, string, phone_number, mobile)
+  const rawPhone = raw.phone ?? raw.phoneNumber ?? raw.phone_number ?? raw.mobile ?? raw.contact ?? raw.originalPhone ?? raw.original_phone ?? null;
+  let cleanPhoneStr: string | undefined = undefined;
+  let normalizedPhone: string | undefined = undefined;
+  if (rawPhone !== null && rawPhone !== undefined && String(rawPhone).trim() !== '') {
+    cleanPhoneStr = String(rawPhone).trim();
+    const norm = normalizeBdPhoneNumber(cleanPhoneStr);
+    normalizedPhone = norm || cleanPhoneStr;
+  }
+
+  // Name (handle full_name, sender_name, customer_name, lead_name, etc.)
+  const rawName = raw.name ?? raw.fullName ?? raw.full_name ?? raw.sender_name ?? raw.lead_name ?? raw.customer_name ?? raw.userName ?? raw.user_name ?? null;
+  let name = rawName ? String(rawName).trim() : '';
+  if (!name) {
+    if (normalizedPhone) {
+      name = `গ্রাহক (${formatBdPhoneNumber(normalizedPhone)})`;
+    } else if (messengerId) {
+      name = `Messenger User (${messengerId.slice(-4)})`;
+    } else {
+      name = 'নতুন লিড (n8n)';
+    }
+  }
+
+  // Sources & Primary Source
+  const rawSource = raw.source ?? raw.channel ?? raw.platform ?? raw.lead_source ?? null;
+  const primarySource = normalizeLeadSource(rawSource, Boolean(messengerId));
+
+  let sourcesList: LeadSource[] = [];
+  const rawSources = raw.sources ?? raw.channels ?? null;
+  if (Array.isArray(rawSources)) {
+    sourcesList = rawSources.map((s) => normalizeLeadSource(s, Boolean(messengerId))).filter((v, i, a) => a.indexOf(v) === i);
+  } else if (typeof rawSources === 'string' && rawSources.trim()) {
+    sourcesList = rawSources.split(',').map((s) => normalizeLeadSource(s, Boolean(messengerId))).filter((v, i, a) => a.indexOf(v) === i);
+  }
+  if (sourcesList.length === 0) {
+    sourcesList = [primarySource];
+  } else if (!sourcesList.includes(primarySource)) {
+    sourcesList.unshift(primarySource);
+  }
+
+  // Dates
+  const nowIso = new Date().toISOString();
+  const rawCreatedAt = raw.createdAt ?? raw.created_at ?? raw.timestamp ?? raw.created_time ?? raw.time ?? raw.date ?? null;
+  const createdAt = safeToIsoString(rawCreatedAt, nowIso);
+
+  const rawUpdatedAt = raw.updatedAt ?? raw.updated_at ?? rawCreatedAt ?? null;
+  const updatedAt = safeToIsoString(rawUpdatedAt, createdAt);
+
+  // Message & Last Message
+  const rawMessage = raw.message ?? raw.lastMessage ?? raw.last_message ?? raw.text ?? raw.comment ?? raw.body ?? raw.lead_message ?? '';
+  const message = typeof rawMessage === 'string' ? rawMessage.trim() : (rawMessage ? String(rawMessage) : '');
+
+  const rawLastMsg = raw.lastMessage ?? raw.last_message ?? raw.message ?? null;
+  const lastMessage = rawLastMsg ? (typeof rawLastMsg === 'string' ? rawLastMsg.trim() : String(rawLastMsg)) : (message || undefined);
+
+  const rawLastMsgAt = raw.lastMessageAt ?? raw.last_message_at ?? rawCreatedAt ?? null;
+  const lastMessageAt = rawLastMsgAt ? safeToIsoString(rawLastMsgAt, createdAt) : (message ? createdAt : undefined);
+
+  // Status
+  const status = normalizeLeadStatus(raw.status ?? raw.lead_status);
+
+  // Tags
+  let tags: string[] = [];
+  const rawTags = raw.tags ?? raw.tag ?? null;
+  if (Array.isArray(rawTags)) {
+    tags = rawTags.map((t) => (typeof t === 'string' ? t.trim() : (t?.name ? String(t.name).trim() : ''))).filter(Boolean);
+  } else if (typeof rawTags === 'string' && rawTags.trim()) {
+    tags = rawTags.split(',').map((t) => t.trim()).filter(Boolean);
+  }
+
+  // Notes
+  let notes: LeadNote[] = [];
+  if (Array.isArray(raw.notes) && raw.notes.length > 0) {
+    notes = raw.notes.map((n: any, idx: number) => ({
+      id: String(n.id || `note-${idx}-${Date.now()}`),
+      content: String(n.content || n.text || ''),
+      createdAt: safeToIsoString(n.createdAt || n.created_at, createdAt),
+      author: String(n.author || 'সিস্টেম / n8n'),
+    })).filter((n: LeadNote) => n.content.trim() !== '');
+  } else if (typeof raw.notes === 'string' && raw.notes.trim()) {
+    notes = [
+      {
+        id: `note-${Date.now()}`,
+        content: raw.notes.trim(),
+        createdAt,
+        author: 'n8n',
+      },
+    ];
+  } else if (typeof raw.note === 'string' && raw.note.trim()) {
+    notes = [
+      {
+        id: `note-${Date.now()}`,
+        content: raw.note.trim(),
+        createdAt,
+        author: 'n8n',
+      },
+    ];
+  }
+
+  // Activities
+  let activities: LeadActivity[] = [];
+  if (Array.isArray(raw.activities) && raw.activities.length > 0) {
+    activities = raw.activities.map((a: any, idx: number) => ({
+      id: String(a.id || `act-${idx}-${Date.now()}`),
+      type: String(a.type || 'created') as any,
+      description: String(a.description || a.details || 'কার্যক্রম'),
+      timestamp: safeToIsoString(a.timestamp || a.createdAt, createdAt),
+      details: a.details ? String(a.details) : undefined,
+      postLink: a.postLink ? String(a.postLink) : undefined,
+      channel: a.channel ? String(a.channel) : undefined,
+    }));
+  } else {
+    activities = [
+      {
+        id: `act-init-${docKey}`,
+        type: 'created',
+        description: `${primarySource.toUpperCase()} থেকে লিড সংগৃহীত হয়েছে (n8n/Firestore)`,
+        timestamp: createdAt,
+        channel: primarySource === 'messenger' ? 'messenger' : (primarySource === 'facebook' ? 'comment' : undefined),
+      },
+    ];
+  }
+
+  // Follow-up Date
+  const rawFollowUp = raw.followUpDate ?? raw.follow_up_date ?? raw.nextFollowUpDate ?? raw.next_follow_up_date ?? null;
+  let followUpDate: string | null = null;
+  if (rawFollowUp) {
+    const parsedFollowUp = safeToIsoString(rawFollowUp, '');
+    if (parsedFollowUp) {
+      followUpDate = parsedFollowUp.split('T')[0];
+    } else if (typeof rawFollowUp === 'string' && rawFollowUp.trim()) {
+      followUpDate = rawFollowUp.trim();
+    }
+  }
+
+  // Page info
+  const rawPageId = raw.pageId ?? raw.page_id ?? raw.pageID ?? raw.facebook_page_id ?? null;
+  const pageId = rawPageId ? String(rawPageId).trim() : undefined;
+
+  const rawPageName = raw.pageName ?? raw.page_name ?? raw.pageTitle ?? raw.page_title ?? null;
+  const pageName = rawPageName ? String(rawPageName).trim() : undefined;
+
+  // Channel & Post Link
+  const rawLastChannel = raw.lastChannel ?? raw.last_channel ?? raw.channel ?? null;
+  const cleanLastChannel = rawLastChannel
+    ? String(rawLastChannel).trim().toLowerCase()
+    : (messengerId ? 'messenger' : (pageId || primarySource === 'facebook' ? 'comment' : undefined));
+
+  const rawPostId = raw.lastPostId ?? raw.last_post_id ?? raw.postId ?? raw.post_id ?? null;
+  const lastPostId = rawPostId ? String(rawPostId).trim() : undefined;
+
+  const rawPostLink = raw.lastPostLink ?? raw.last_post_link ?? raw.postLink ?? raw.post_link ?? null;
+  const lastPostLink = rawPostLink ? String(rawPostLink).trim() : undefined;
+
+  const rawProfileLink = raw.profileLink ?? raw.profile_link ?? raw.facebook_profile ?? null;
+  const profileLink = rawProfileLink ? String(rawProfileLink).trim() : undefined;
+
+  return {
+    id: docKey,
+    name,
+    phone: normalizedPhone,
+    originalPhone: cleanPhoneStr || normalizedPhone,
+    messengerId,
+    profileLink,
+    lastChannel: cleanLastChannel as any,
+    lastMessage,
+    lastMessageAt,
+    lastPostId,
+    lastPostLink,
+    source: primarySource,
+    sources: sourcesList,
+    productInterest: raw.productInterest || raw.product_interest || raw.product || 'সাধারণ অনুসন্ধান',
+    message,
+    status,
+    tags,
+    createdAt,
+    updatedAt,
+    followUpDate,
+    nextFollowUpDate: followUpDate,
+    assignedTo: raw.assignedTo || raw.assigned_to || raw.assignee || null,
+    notes,
+    activities,
+    estimatedValue: typeof raw.estimatedValue === 'number' ? raw.estimatedValue : (Number(raw.value || raw.amount) || 0),
+    isStarred: Boolean(raw.isStarred ?? raw.is_starred ?? raw.starred ?? false),
+    lastSeenAt: raw.lastSeenAt ? safeToIsoString(raw.lastSeenAt, nowIso) : undefined,
+    pageId,
+    pageName,
+  };
+}
+
 class LeadService {
   private activeUserId: string | null = null;
 
@@ -116,7 +412,7 @@ class LeadService {
       if (stored !== null) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          return parsed;
+          return parsed.map((item) => normalizeFirestoreLead(item.id, item));
         }
       }
     } catch (e) {
@@ -145,18 +441,21 @@ class LeadService {
   /**
    * Real-time Firestore subscription via onSnapshot for users/{uid}/leads.
    * If Firestore is configured, attaches a real-time listener to the logged-in user's subcollection.
-   * If a new user logs in, the collection is empty, so snapshot returns [] (empty inbox).
+   * Any lead written by n8n or webhooks is automatically normalized and safely rendered with defaults.
+   * Emits debugInfo containing UID, database ID, path, docCount, and error info.
    */
   public subscribeToLeads(
-    onUpdate: (leads: Lead[]) => void,
-    onError?: (error: FirestoreErrorPayload) => void,
+    onUpdate: (leads: Lead[], debugInfo?: FirestoreDebugInfo) => void,
+    onError?: (error: FirestoreErrorPayload, debugInfo?: FirestoreDebugInfo) => void,
     userId?: string | null
   ): () => void {
     if (userId) {
       this.activeUserId = userId;
     }
     const { db, auth } = initializeFirebaseInstances();
-    const uid = userId || this.getActiveUserId() || auth?.currentUser?.uid;
+    const uid = userId || this.getActiveUserId() || auth?.currentUser?.uid || '';
+    const activeDbId = getActiveDatabaseId();
+    const collectionPath = uid ? `users/${uid}/leads` : 'users/{uid}/leads';
 
     if (isFirebaseConfigured() && db && uid) {
       try {
@@ -167,55 +466,30 @@ class LeadService {
             const firestoreLeads: Lead[] = [];
             snapshot.forEach((docSnapshot) => {
               const data = docSnapshot.data() as any;
-              // Explicitly extract lastChannel from Firestore document data
-              const rawLastChannel = data.lastChannel ?? data.last_channel ?? data.LastChannel ?? null;
-              const cleanLastChannel = rawLastChannel ? String(rawLastChannel).trim().toLowerCase() : undefined;
-
-              // Ensure sources array has values
-              const rawSources = Array.isArray(data.sources) && data.sources.length > 0
-                ? data.sources
-                : (data.source ? [data.source] : ['facebook']);
-
-              const leadItem: Lead = {
-                id: docSnapshot.id || data.id,
-                name: data.name || (data.messengerId ? `Messenger User (${String(data.messengerId).slice(-4)})` : 'অজ্ঞাত লিড'),
-                phone: data.phone || data.originalPhone || undefined,
-                originalPhone: data.originalPhone || data.phone || undefined,
-                source: data.source || rawSources[0] || 'facebook',
-                sources: rawSources,
-                messengerId: data.messengerId ? String(data.messengerId) : undefined,
-                profileLink: data.profileLink || undefined,
-                message: data.message || data.lastMessage || '',
-                lastMessage: data.lastMessage || data.message || undefined,
-                lastMessageAt: data.lastMessageAt || data.createdAt || undefined,
-                status: data.status || 'new',
-                tags: Array.isArray(data.tags) ? data.tags : [],
-                isStarred: Boolean(data.isStarred),
-                assignedTo: data.assignedTo || null,
-                followUpDate: data.followUpDate || data.nextFollowUpDate || null,
-                nextFollowUpDate: data.nextFollowUpDate || data.followUpDate || null,
-                notes: Array.isArray(data.notes) ? data.notes : [],
-                activities: Array.isArray(data.activities) ? data.activities : [],
-                createdAt: data.createdAt || new Date().toISOString(),
-                updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
-                pageId: data.pageId ? String(data.pageId) : undefined,
-                pageName: data.pageName ? String(data.pageName) : undefined,
-                lastChannel: cleanLastChannel,
-                lastPostId: data.lastPostId ? String(data.lastPostId) : undefined,
-                lastPostLink: data.lastPostLink ? String(data.lastPostLink) : undefined,
-                estimatedValue: typeof data.estimatedValue === 'number' ? data.estimatedValue : 0,
-                productInterest: data.productInterest || 'সাধারণ অনুসন্ধান',
-              };
-
+              const leadItem = normalizeFirestoreLead(docSnapshot.id, data);
               firestoreLeads.push(leadItem);
             });
 
-            // Sort newest first
-            firestoreLeads.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            // Sort newest first safely with parsed ISO strings
+            firestoreLeads.sort((a, b) => {
+              const timeA = new Date(a.lastMessageAt || a.createdAt).getTime() || 0;
+              const timeB = new Date(b.lastMessageAt || b.createdAt).getTime() || 0;
+              return timeB - timeA;
+            });
 
             // Save to user-specific Firestore cache
             this.saveLeads(firestoreLeads, uid);
-            onUpdate(firestoreLeads);
+
+            const debugInfo: FirestoreDebugInfo = {
+              uid,
+              databaseId: activeDbId,
+              path: collectionPath,
+              docCount: snapshot.size,
+              status: 'connected',
+              lastUpdated: new Date().toLocaleTimeString('bn-BD'),
+            };
+
+            onUpdate(firestoreLeads, debugInfo);
           },
           (error) => {
             console.error('Firestore onSnapshot error:', error);
@@ -228,50 +502,91 @@ class LeadService {
               userFriendlyDetails = 'Firestore সার্ভিস বর্তমানে সংযোগ পাচ্ছে না (unavailable)। ইন্টারনেট সংযোগ পরীক্ষা করুন।';
             }
 
+            const debugInfo: FirestoreDebugInfo = {
+              uid,
+              databaseId: activeDbId,
+              path: collectionPath,
+              docCount: 0,
+              status: 'error',
+              errorCode: error.code,
+              errorMessage: error.message,
+              lastUpdated: new Date().toLocaleTimeString('bn-BD'),
+            };
+
             if (onError) {
-              onError({
-                code: error.code,
-                message: error.message,
-                details: userFriendlyDetails,
-              });
+              onError(
+                {
+                  code: error.code,
+                  message: error.message,
+                  details: userFriendlyDetails,
+                },
+                debugInfo
+              );
             }
             // For new user or permission issue, do NOT load mock leads
-            onUpdate([]);
+            onUpdate([], debugInfo);
           }
         );
 
         return unsubscribe;
       } catch (err: any) {
         console.error('Error subscribing to Firestore leads:', err);
+        const debugInfo: FirestoreDebugInfo = {
+          uid: uid || 'unknown',
+          databaseId: activeDbId,
+          path: collectionPath,
+          docCount: 0,
+          status: 'error',
+          errorCode: err?.code || 'unknown',
+          errorMessage: err?.message || String(err),
+          lastUpdated: new Date().toLocaleTimeString('bn-BD'),
+        };
         if (onError) {
-          onError({
-            code: err?.code || 'unknown',
-            message: err?.message || String(err),
-            details: 'Firestore কানেকশন শুরু করতে ব্যর্থ হয়েছে। Firebase কনফিগারেশন চেক করুন।',
-          });
+          onError(
+            {
+              code: err?.code || 'unknown',
+              message: err?.message || String(err),
+              details: 'Firestore কানেকশন শুরু করতে ব্যর্থ হয়েছে। Firebase কনফিগারেশন চেক করুন।',
+            },
+            debugInfo
+          );
         }
-        onUpdate([]);
+        onUpdate([], debugInfo);
         return () => {};
       }
     }
 
     // Local fallback listener (only when Firebase is not configured at all)
     const handleLocalUpdate = () => {
-      onUpdate(this.getLeads(uid));
+      const localLeads = this.getLeads(uid);
+      const debugInfo: FirestoreDebugInfo = {
+        uid: uid || 'local-user',
+        databaseId: 'local-storage',
+        path: `localStorage/leads`,
+        docCount: localLeads.length,
+        status: 'connected',
+        lastUpdated: new Date().toLocaleTimeString('bn-BD'),
+      };
+      onUpdate(localLeads, debugInfo);
     };
 
     window.addEventListener('leads_storage_updated', handleLocalUpdate);
-    // Initial call
-    onUpdate(this.getLeads(uid));
-
-    return () => {
-      window.removeEventListener('leads_storage_updated', handleLocalUpdate);
+    const initialLeads = this.getLeads(uid);
+    const initialDebugInfo: FirestoreDebugInfo = {
+      uid: uid || 'local-user',
+      databaseId: 'local-storage',
+      path: `localStorage/leads`,
+      docCount: initialLeads.length,
+      status: 'connected',
+      lastUpdated: new Date().toLocaleTimeString('bn-BD'),
     };
+    onUpdate(initialLeads, initialDebugInfo);
 
     return () => {
       window.removeEventListener('leads_storage_updated', handleLocalUpdate);
     };
   }
+
 
   /**
    * Finds an existing lead with the same normalized phone number
@@ -912,35 +1227,42 @@ class LeadService {
     let totalEstimatedPipelineValue = 0;
     let unreadCount = 0;
 
-    for (const l of leads) {
-      if (l.sources.includes('facebook') || l.source === 'facebook') facebookCount++;
-      if (l.sources.includes('messenger') || l.source === 'messenger') messengerCount++;
-      if (l.sources.includes('whatsapp') || l.source === 'whatsapp') whatsappCount++;
-      if (l.sources.includes('manual') || l.source === 'manual') manualCount++;
+    for (const l of (leads || [])) {
+      const sourcesArr = Array.isArray(l.sources) && l.sources.length > 0 ? l.sources : [l.source || 'facebook'];
+      if (sourcesArr.includes('facebook') || l.source === 'facebook') facebookCount++;
+      if (sourcesArr.includes('messenger') || l.source === 'messenger') messengerCount++;
+      if (sourcesArr.includes('whatsapp') || l.source === 'whatsapp') whatsappCount++;
+      if (sourcesArr.includes('manual') || l.source === 'manual') manualCount++;
 
-      if (l.createdAt.startsWith(today)) {
+      const createdStr = typeof l.createdAt === 'string' ? l.createdAt : safeToIsoString(l.createdAt);
+      if (createdStr.startsWith(today)) {
         todayNewLeads++;
       }
 
-      const followUpVal = l.followUpDate || l.nextFollowUpDate;
-      if (followUpVal && followUpVal.startsWith(today) && l.status !== 'won' && l.status !== 'lost') {
+      const rawFollowUp = l.followUpDate || l.nextFollowUpDate;
+      const followUpStr = typeof rawFollowUp === 'string' ? rawFollowUp : '';
+      if (followUpStr && followUpStr.startsWith(today) && l.status !== 'won' && l.status !== 'lost') {
         todayFollowUpCount++;
       }
 
       if (l.status === 'won') wonCount++;
       if (l.status === 'lost') lostCount++;
 
-      if (l.estimatedValue) {
+      if (l.estimatedValue && typeof l.estimatedValue === 'number' && !isNaN(l.estimatedValue)) {
         totalEstimatedPipelineValue += l.estimatedValue;
       }
 
-      if (l.lastMessageAt && (!l.lastSeenAt || new Date(l.lastMessageAt).getTime() > new Date(l.lastSeenAt).getTime())) {
-        unreadCount++;
+      if (l.lastMessageAt) {
+        const lastMsgTime = new Date(l.lastMessageAt).getTime();
+        const lastSeenTime = l.lastSeenAt ? new Date(l.lastSeenAt).getTime() : 0;
+        if (!isNaN(lastMsgTime) && (lastSeenTime === 0 || lastMsgTime > lastSeenTime)) {
+          unreadCount++;
+        }
       }
     }
 
     return {
-      totalLeads: leads.length,
+      totalLeads: leads?.length || 0,
       todayNewLeads,
       facebookCount,
       messengerCount,

@@ -21,16 +21,22 @@ const FIREBASE_CONFIG_STORAGE_KEY = 'user_firebase_custom_config_v1';
 // with fallback to bundledConfig (post-510005 project)
 const env = import.meta.env || {};
 
+export const FIRESTORE_DATABASE_ID = 'ai-studio-unifiedleadinbox-0b829395-84c1-4d8f-be98-a6a6c0d8634d';
+
 export const DEFAULT_FIREBASE_CONFIG: FirebaseClientConfig = {
   apiKey: env.VITE_FIREBASE_API_KEY || bundledConfig.apiKey || '',
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || bundledConfig.authDomain || 'post-510005.firebaseapp.com',
   projectId: env.VITE_FIREBASE_PROJECT_ID || bundledConfig.projectId || 'post-510005',
-  firestoreDatabaseId: env.VITE_FIREBASE_DATABASE_ID || bundledConfig.firestoreDatabaseId || '(default)',
+  firestoreDatabaseId: FIRESTORE_DATABASE_ID,
   storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || bundledConfig.storageBucket || 'post-510005.firebasestorage.app',
   messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || bundledConfig.messagingSenderId || '1017708746606',
   appId: env.VITE_FIREBASE_APP_ID || bundledConfig.appId || '',
   measurementId: env.VITE_FIREBASE_MEASUREMENT_ID || bundledConfig.measurementId || '',
 };
+
+export function getActiveDatabaseId(): string {
+  return FIRESTORE_DATABASE_ID;
+}
 
 /**
  * Gets currently saved Firebase configuration (or defaults to project post-510005)
@@ -44,7 +50,7 @@ export function getSavedFirebaseConfig(): FirebaseClientConfig | null {
         return {
           ...DEFAULT_FIREBASE_CONFIG,
           ...parsed,
-          firestoreDatabaseId: parsed.firestoreDatabaseId || '(default)',
+          firestoreDatabaseId: FIRESTORE_DATABASE_ID,
         };
       }
     }
@@ -62,7 +68,11 @@ export function getSavedFirebaseConfig(): FirebaseClientConfig | null {
  * Saves and re-initializes Firebase configuration
  */
 export function saveFirebaseConfig(config: FirebaseClientConfig): void {
-  localStorage.setItem(FIREBASE_CONFIG_STORAGE_KEY, JSON.stringify(config));
+  const normalized = {
+    ...config,
+    firestoreDatabaseId: FIRESTORE_DATABASE_ID,
+  };
+  localStorage.setItem(FIREBASE_CONFIG_STORAGE_KEY, JSON.stringify(normalized));
   window.dispatchEvent(new CustomEvent('firebase_config_updated'));
 }
 
@@ -99,7 +109,8 @@ export function initializeFirebaseInstances(): {
     } else {
       appInstance = getApp();
     }
-    dbInstance = getFirestore(appInstance);
+    // Explicitly initialize Firestore with designated database ID for all reads and writes
+    dbInstance = getFirestore(appInstance, FIRESTORE_DATABASE_ID);
     authInstance = getAuth(appInstance);
   } catch (error) {
     console.error('Error initializing Firebase SDK:', error);

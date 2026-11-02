@@ -16,17 +16,20 @@ import { Lead, LeadSource } from '../../types/lead';
 import { leadService } from '../../services/leadService';
 import { exportLeadsToCSV } from '../../utils/formatters';
 import { normalizeBdPhoneNumber } from '../../utils/phone';
+import { AdminUser } from '../../services/authService';
 
 interface ImportExportViewProps {
   leads: Lead[];
   onLeadsUpdated: () => void;
   onShowToast: (msg: string) => void;
+  currentUser?: AdminUser | null;
 }
 
 export const ImportExportView: React.FC<ImportExportViewProps> = ({
   leads,
   onLeadsUpdated,
   onShowToast,
+  currentUser,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'webhook' | 'csv_import' | 'export'>('webhook');
 
@@ -542,9 +545,30 @@ export const ImportExportView: React.FC<ImportExportViewProps> = ({
                   <span>{copiedCode ? 'কপি হয়েছে!' : 'JSON কপি করুন'}</span>
                 </button>
               </div>
-              <p className="text-[11px] text-blue-800/80 dark:text-blue-200/80 mb-3 leading-relaxed">
-                n8n-এ <strong>Google Cloud Firestore</strong> নোড ব্যবহার করে সরাসরি <code>leads</code> কালেকশনে ডকুমেন্ট তৈরি করতে চাইলে নিচের JSON স্ট্রাকচার ব্যবহার করুন:
-              </p>
+              <div className="mb-3 rounded-lg border border-blue-200 bg-white/70 p-2.5 text-xs text-blue-900 dark:border-blue-900 dark:bg-slate-900/60 dark:text-blue-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-1.5">
+                  <span className="font-semibold">Firestore ডেটাবেস আইডি:</span>
+                  <span className="font-mono text-[11px] font-bold bg-blue-100 dark:bg-blue-950 px-2 py-0.5 rounded text-blue-800 dark:text-blue-300 select-all">
+                    ai-studio-unifiedleadinbox-0b829395-84c1-4d8f-be98-a6a6c0d8634d
+                  </span>
+                </div>
+                <span className="font-semibold">Firestore কালেকশন পাথ (n8n এর জন্য):</span>
+                <div className="mt-1 flex items-center justify-between rounded bg-slate-900 px-2.5 py-1.5 font-mono text-[11px] text-emerald-400">
+                  <span>users/{currentUser?.uid || '<আপনার_UID>'}/leads</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`users/${currentUser?.uid || ''}/leads`);
+                      onShowToast('পাথ কপি হয়েছে!');
+                    }}
+                    className="ml-2 text-[10px] text-blue-400 hover:text-white"
+                  >
+                    কপি পাথ
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[11px] text-blue-700/80 dark:text-blue-300/80">
+                  * n8n থেকে শুধুমাত্র <code>id, name, phone, source, sources, messengerId</code> ফিল্ড পাঠালেও অ্যাপ নিজ থেকে বাকি সব ফিল্ডের ডিফল্ট মান ধরে ইনবক্সে দেখাবে।
+                </p>
+              </div>
               <pre className="overflow-x-auto rounded-lg bg-slate-950 p-3 font-mono text-[10px] text-emerald-400 max-h-60">
 {`{
   "id": "lead-1711234567890",

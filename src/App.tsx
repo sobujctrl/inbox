@@ -10,7 +10,7 @@ import { SettingsView } from './components/settings/SettingsView';
 import { LeadDetailDrawer } from './components/detail/LeadDetailDrawer';
 import { AddLeadModal } from './components/modals/AddLeadModal';
 import { Lead, LeadStatus } from './types/lead';
-import { leadService, FirestoreErrorPayload } from './services/leadService';
+import { leadService, FirestoreErrorPayload, FirestoreDebugInfo } from './services/leadService';
 import { exportLeadsToCSV } from './utils/formatters';
 import { authService, AdminUser } from './services/authService';
 import { firebaseAuthService, AUTHORIZED_ADMIN_EMAIL } from './services/firebaseAuthService';
@@ -30,8 +30,9 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(() => isFb);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Firestore real-time error banner
+  // Firestore real-time error banner & diagnostics
   const [firestoreError, setFirestoreError] = useState<FirestoreErrorPayload | null>(null);
+  const [firestoreDebug, setFirestoreDebug] = useState<FirestoreDebugInfo | null>(null);
 
   const [activeTab, setActiveTab] = useState<ActiveNavTab>('inbox');
   const [leads, setLeads] = useState<Lead[]>(() => {
@@ -109,17 +110,23 @@ export default function App() {
     leadService.setActiveUserId(uid);
 
     const unsubscribe = leadService.subscribeToLeads(
-      (updatedLeads) => {
+      (updatedLeads, debugInfo) => {
         setLeads(updatedLeads);
+        if (debugInfo) {
+          setFirestoreDebug(debugInfo);
+        }
         setFirestoreError(null); // Clear error on successful sync
         setSelectedLead((prev) => {
           if (!prev) return null;
           return updatedLeads.find((l) => l.id === prev.id) || null;
         });
       },
-      (errorPayload) => {
+      (errorPayload, debugInfo) => {
         console.error('Firestore Error in App:', errorPayload);
         setFirestoreError(errorPayload);
+        if (debugInfo) {
+          setFirestoreDebug(debugInfo);
+        }
       },
       uid
     );
@@ -328,6 +335,7 @@ export default function App() {
                 isFollowUpFilterActive={isFollowUpFilterActive}
                 onToggleFollowUpFilter={() => setIsFollowUpFilterActive(!isFollowUpFilterActive)}
                 firestoreError={firestoreError}
+                firestoreDebug={firestoreDebug}
                 onRetryFirestore={() => {
                   setFirestoreError(null);
                   refreshLeads();
@@ -367,6 +375,7 @@ export default function App() {
               leads={leads}
               onLeadsUpdated={refreshLeads}
               onShowToast={(msg) => showToast(msg)}
+              currentUser={currentUser}
             />
           )}
 
