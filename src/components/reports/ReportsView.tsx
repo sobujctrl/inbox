@@ -35,6 +35,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ leads, stats }) => {
     { name: 'Facebook', value: stats.facebookCount, color: '#1877F2' },
     { name: 'Messenger', value: stats.messengerCount, color: '#0084FF' },
     { name: 'WhatsApp', value: stats.whatsappCount, color: '#25D366' },
+    { name: 'Website', value: stats.websiteCount, color: '#0D9488' },
     { name: 'ম্যানুয়াল', value: stats.manualCount, color: '#64748B' },
   ].filter((item) => item.value > 0);
 

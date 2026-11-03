@@ -29,12 +29,46 @@
         "lastPostLink": { "type": "string", "description": "Facebook post URL" }
       },
       "required": ["name", "source"]
+    },
+    "FacebookConnectedPage": {
+      "title": "FacebookConnectedPage",
+      "description": "Represents a connected Facebook Page with its Page Access Token for automated lead sync.",
+      "type": "object",
+      "properties": {
+        "pageId": { "type": "string", "description": "Facebook Page ID" },
+        "name": { "type": "string", "description": "Facebook Page name" },
+        "token": { "type": "string", "description": "Facebook Page Access Token" },
+        "connectedAt": { "type": "string", "description": "ISO timestamp when the page was connected" },
+        "category": { "type": "string", "description": "Facebook Page category" },
+        "subscribed": { "type": "boolean", "description": "Whether webhooks are subscribed" }
+      },
+      "required": ["pageId", "name", "token", "connectedAt"]
+    },
+    "PageOwner": {
+      "title": "PageOwner",
+      "description": "Lookup index mapping a Facebook Page ID to the application user UID for n8n webhook routing.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID of the owner" },
+        "pageId": { "type": "string", "description": "Facebook Page ID" },
+        "name": { "type": "string", "description": "Facebook Page name" },
+        "connectedAt": { "type": "string", "description": "ISO timestamp of connection" }
+      },
+      "required": ["uid", "pageId"]
     }
   },
   "firestore": {
     "/users/{userId}/leads/{leadId}": {
       "schema": "Lead",
       "description": "Per-user unified leads collection. Each authenticated user owns and accesses only their own leads."
+    },
+    "/users/{userId}/pages/{pageId}": {
+      "schema": "FacebookConnectedPage",
+      "description": "Per-user connected Facebook Pages subcollection."
+    },
+    "/pageOwners/{pageId}": {
+      "schema": "PageOwner",
+      "description": "Global page ID lookup index mapping pageId to user UID for n8n webhook intake."
     }
   }
 }

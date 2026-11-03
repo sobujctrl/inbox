@@ -1,4 +1,4 @@
-export type LeadSource = 'facebook' | 'messenger' | 'whatsapp' | 'manual';
+export type LeadSource = 'facebook' | 'messenger' | 'whatsapp' | 'website' | 'manual';
 
 export type LeadStatus = 'new' | 'contacted' | 'followup' | 'won' | 'lost';
 

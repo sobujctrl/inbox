@@ -65,6 +65,7 @@ export interface SummaryStats {
   facebookCount: number;
   messengerCount: number;
   whatsappCount: number;
+  websiteCount: number;
   manualCount: number;
   todayFollowUpCount: number;
   wonCount: number;
@@ -142,6 +143,7 @@ export function normalizeLeadSource(src?: any, hasMessengerId?: boolean): LeadSo
   const s = String(src).toLowerCase().trim();
   if (s.includes('messenger') || s === 'msg' || s === 'chat') return 'messenger';
   if (s.includes('whatsapp') || s === 'wa') return 'whatsapp';
+  if (s.includes('web') || s.includes('ওয়েবসাইট') || s === 'site') return 'website';
   if (s.includes('manual') || s === 'offline') return 'manual';
   if (s.includes('face') || s.includes('fb') || s.includes('meta') || s.includes('comment')) return 'facebook';
   return hasMessengerId ? 'messenger' : 'facebook';
@@ -1220,6 +1222,7 @@ class LeadService {
     let facebookCount = 0;
     let messengerCount = 0;
     let whatsappCount = 0;
+    let websiteCount = 0;
     let manualCount = 0;
     let todayFollowUpCount = 0;
     let wonCount = 0;
@@ -1232,6 +1235,7 @@ class LeadService {
       if (sourcesArr.includes('facebook') || l.source === 'facebook') facebookCount++;
       if (sourcesArr.includes('messenger') || l.source === 'messenger') messengerCount++;
       if (sourcesArr.includes('whatsapp') || l.source === 'whatsapp') whatsappCount++;
+      if (sourcesArr.includes('website') || l.source === 'website') websiteCount++;
       if (sourcesArr.includes('manual') || l.source === 'manual') manualCount++;
 
       const createdStr = typeof l.createdAt === 'string' ? l.createdAt : safeToIsoString(l.createdAt);
@@ -1267,6 +1271,7 @@ class LeadService {
       facebookCount,
       messengerCount,
       whatsappCount,
+      websiteCount,
       manualCount,
       todayFollowUpCount,
       wonCount,

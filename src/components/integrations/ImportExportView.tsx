@@ -247,6 +247,7 @@ export const ImportExportView: React.FC<ImportExportViewProps> = ({
       if (rawSource.includes('face') || rawSource.includes('ফেসবুক')) src = 'facebook';
       else if (rawSource.includes('mess') || rawSource.includes('মেসেঞ্জার')) src = 'messenger';
       else if (rawSource.includes('what') || rawSource.includes('হোয়াটসঅ্যাপ')) src = 'whatsapp';
+      else if (rawSource.includes('web') || rawSource.includes('ওয়েবসাইট')) src = 'website';
 
       const normalized = normalizeBdPhoneNumber(phone);
       const existing = leadService.findLeadByPhone(normalized);
@@ -567,6 +568,9 @@ export const ImportExportView: React.FC<ImportExportViewProps> = ({
                 </div>
                 <p className="mt-1.5 text-[11px] text-blue-700/80 dark:text-blue-300/80">
                   * n8n থেকে শুধুমাত্র <code>id, name, phone, source, sources, messengerId</code> ফিল্ড পাঠালেও অ্যাপ নিজ থেকে বাকি সব ফিল্ডের ডিফল্ট মান ধরে ইনবক্সে দেখাবে।
+                </p>
+                <p className="mt-1 text-[11px] text-indigo-700 dark:text-indigo-300 font-semibold">
+                  * Facebook Webhook আসলে পেজের মালিক শনাক্ত করতে n8n-এ Firestore থেকে <code>pageOwners/{'{pageId}'}</code> পড়ে সরাসরি <code>users/{'{uid}'}/leads</code>-এ লিড সেভ করতে পারবেন।
                 </p>
               </div>
               <pre className="overflow-x-auto rounded-lg bg-slate-950 p-3 font-mono text-[10px] text-emerald-400 max-h-60">

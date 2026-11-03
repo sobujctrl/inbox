@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { Lead, LeadSource, LeadStatus } from '../../types/lead';
 import { FirestoreErrorPayload, FirestoreDebugInfo } from '../../services/leadService';
-import { SourceBadge, FacebookIcon, MessengerIcon, WhatsAppIcon, ManualIcon } from '../common/SourceBadge';
+import { SourceBadge, FacebookIcon, MessengerIcon, WhatsAppIcon, WebsiteIcon, ManualIcon } from '../common/SourceBadge';
 import { StatusBadge } from '../common/StatusBadge';
 import { ChannelBadge, resolveMessageChannel } from '../common/ChannelBadge';
 import { PageBadge } from '../common/PageBadge';
@@ -134,6 +134,12 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
       label: 'WhatsApp',
       icon: <WhatsAppIcon className="w-3.5 h-3.5 text-[#25D366]" />,
       count: leads.filter((l) => l.sources.includes('whatsapp') || l.source === 'whatsapp').length,
+    },
+    {
+      id: 'website',
+      label: 'Website',
+      icon: <WebsiteIcon className="w-3.5 h-3.5 text-teal-600" />,
+      count: leads.filter((l) => l.sources.includes('website') || l.source === 'website').length,
     },
     {
       id: 'manual',

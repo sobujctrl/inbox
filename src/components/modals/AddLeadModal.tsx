@@ -4,7 +4,7 @@ import { LeadSource, LeadStatus, Lead } from '../../types/lead';
 import { leadService } from '../../services/leadService';
 import { normalizeBdPhoneNumber, formatBdPhoneNumber, isValidBdPhoneNumber } from '../../utils/phone';
 import { SOURCE_LABELS, PRESET_TAGS, TEAM_MEMBERS } from '../../utils/formatters';
-import { FacebookIcon, MessengerIcon, WhatsAppIcon, ManualIcon } from '../common/SourceBadge';
+import { FacebookIcon, MessengerIcon, WhatsAppIcon, WebsiteIcon, ManualIcon } from '../common/SourceBadge';
 
 interface AddLeadModalProps {
   isOpen: boolean;
@@ -115,6 +115,12 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
       label: 'WhatsApp',
       icon: <WhatsAppIcon className="w-4 h-4 text-[#25D366]" />,
       color: 'hover:border-emerald-400',
+    },
+    {
+      id: 'website',
+      label: 'Website',
+      icon: <WebsiteIcon className="w-4 h-4 text-teal-600" />,
+      color: 'hover:border-teal-400',
     },
     {
       id: 'manual',

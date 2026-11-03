@@ -2,7 +2,7 @@ import React from 'react';
 import { Users, Calendar, PhoneCall, TrendingUp, MessageSquare } from 'lucide-react';
 import { SummaryStats } from '../../services/leadService';
 import { toBengaliNumerals, formatTaka } from '../../utils/formatters';
-import { FacebookIcon, MessengerIcon, WhatsAppIcon } from '../common/SourceBadge';
+import { FacebookIcon, MessengerIcon, WhatsAppIcon, WebsiteIcon } from '../common/SourceBadge';
 
 interface SummaryCardsProps {
   stats: SummaryStats;
@@ -20,7 +20,7 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
   onToggleFollowUpFilter,
 }) => {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-8">
       {/* 1. Total Leads */}
       <div
         onClick={() => onSelectSource('all')}
@@ -138,6 +138,33 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
           <span className="text-[11px] text-slate-500 dark:text-slate-400">
             {stats.totalLeads > 0
               ? `${toBengaliNumerals(Math.round((stats.whatsappCount / stats.totalLeads) * 100))}%`
+              : '০%'}
+          </span>
+        </div>
+      </div>
+
+      {/* 6. Website Leads */}
+      <div
+        onClick={() => onSelectSource('website')}
+        className={`group cursor-pointer rounded-xl border p-3.5 transition-all hover:shadow-sm ${
+          selectedSourceFilter === 'website'
+            ? 'border-teal-500 bg-teal-50/50 ring-1 ring-teal-500 dark:border-teal-400 dark:bg-teal-950/40'
+            : 'border-slate-200/80 bg-white hover:border-slate-300 dark:border-slate-700/80 dark:bg-[#1e293b] dark:hover:border-slate-600'
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Website</span>
+          <div className="rounded-lg bg-teal-50 p-1.5 dark:bg-teal-950">
+            <WebsiteIcon className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+          </div>
+        </div>
+        <div className="mt-2 flex items-baseline justify-between">
+          <span className="text-2xl font-bold tracking-tight text-teal-600 tabular-nums dark:text-teal-400">
+            {toBengaliNumerals(stats.websiteCount)}
+          </span>
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+            {stats.totalLeads > 0
+              ? `${toBengaliNumerals(Math.round((stats.websiteCount / stats.totalLeads) * 100))}%`
               : '০%'}
           </span>
         </div>

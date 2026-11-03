@@ -1,4 +1,5 @@
 import React from 'react';
+import { Globe } from 'lucide-react';
 import { LeadSource } from '../../types/lead';
 import { SOURCE_LABELS } from '../../utils/formatters';
 
@@ -28,6 +29,10 @@ export const WhatsAppIcon: React.FC<{ className?: string }> = ({ className = 'w-
   </svg>
 );
 
+export const WebsiteIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
+  <Globe className={className} />
+);
+
 export const ManualIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
   <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
@@ -43,6 +48,8 @@ export const getSourceIcon = (source: LeadSource, className?: string) => {
       return <MessengerIcon className={className || 'w-4 h-4'} />;
     case 'whatsapp':
       return <WhatsAppIcon className={className || 'w-4 h-4'} />;
+    case 'website':
+      return <WebsiteIcon className={className || 'w-4 h-4'} />;
     case 'manual':
     default:
       return <ManualIcon className={className || 'w-4 h-4'} />;
@@ -77,6 +84,15 @@ export const getSourceTheme = (source: LeadSource) => {
         brandBg: 'bg-[#25D366]',
         iconColor: 'text-[#25D366]',
         name: 'WhatsApp',
+      };
+    case 'website':
+      return {
+        bg: 'bg-teal-50 dark:bg-teal-950/60',
+        text: 'text-teal-700 dark:text-teal-300',
+        border: 'border-teal-200 dark:border-teal-800/60',
+        brandBg: 'bg-teal-600',
+        iconColor: 'text-teal-600 dark:text-teal-400',
+        name: 'Website',
       };
     case 'manual':
     default:

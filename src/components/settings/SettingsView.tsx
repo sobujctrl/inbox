@@ -32,6 +32,7 @@ import {
 } from '../../firebase/config';
 import { ALLOWED_EMAILS, PRIMARY_ADMIN_EMAIL } from '../../config/authConfig';
 import { TEAM_MEMBERS, PRESET_TAGS, toBengaliNumerals } from '../../utils/formatters';
+import { FacebookPageConnectSection } from './FacebookPageConnectSection';
 
 interface SettingsViewProps {
   leads: Lead[];
@@ -419,7 +420,13 @@ service cloud.firestore {
         </form>
       </div>
 
-      {/* 2. Multi-User Authentication & Data Isolation */}
+      {/* 2. Facebook Page Connect Section */}
+      <FacebookPageConnectSection
+        currentUserId={activeUser?.uid || currentUser?.uid}
+        onShowToast={(msg) => onShowToast(msg)}
+      />
+
+      {/* 3. Multi-User Authentication & Data Isolation */}
       <div className="rounded-xl border border-slate-200/80 bg-white p-5 shadow-2xs dark:border-slate-800 dark:bg-slate-900 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-200/80 pb-3 dark:border-slate-800">
           <div className="flex items-center gap-2.5">

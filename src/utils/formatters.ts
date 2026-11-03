@@ -5,6 +5,7 @@ export const SOURCE_LABELS: Record<LeadSource, string> = {
   facebook: 'Facebook',
   messenger: 'Messenger',
   whatsapp: 'WhatsApp',
+  website: 'ওয়েবসাইট',
   manual: 'ম্যানুয়াল এন্ট্রি',
 };
 

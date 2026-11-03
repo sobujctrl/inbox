@@ -17,6 +17,19 @@ service cloud.firestore {
       allow read, write: if isOwner(userId);
     }
 
+    // Per-user connected Facebook pages subcollection:
+    match /users/{userId}/pages/{pageId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // Page owner mapping (used by n8n and app):
+    // Authenticated users can claim/update their own page mapping or delete it.
+    match /pageOwners/{pageId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (request.resource.data.uid == request.auth.uid);
+      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid);
+    }
+
     // User settings / profile document (if used)
     match /users/{userId} {
       allow read, write: if isOwner(userId);
