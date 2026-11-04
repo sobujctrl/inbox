@@ -9,8 +9,9 @@ import { ImportExportView } from './components/integrations/ImportExportView';
 import { SettingsView } from './components/settings/SettingsView';
 import { LeadDetailDrawer } from './components/detail/LeadDetailDrawer';
 import { AddLeadModal } from './components/modals/AddLeadModal';
-import { Lead, LeadStatus } from './types/lead';
-import { leadService, FirestoreErrorPayload, FirestoreDebugInfo } from './services/leadService';
+import { ResetOptionsModal } from './components/modals/ResetOptionsModal';
+import { Lead, LeadStatus, LeadSource } from './types/lead';
+import { leadService, FirestoreErrorPayload, FirestoreDebugInfo, getDhakaDateString, getDateRangeBoundaries } from './services/leadService';
 import { exportLeadsToCSV } from './utils/formatters';
 import { authService, AdminUser } from './services/authService';
 import { firebaseAuthService, AUTHORIZED_ADMIN_EMAIL } from './services/firebaseAuthService';
@@ -41,11 +42,131 @@ export default function App() {
   });
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  
+  // Filter states
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isFollowUpFilterActive, setIsFollowUpFilterActive] = useState(false);
+  const [isTodayNewFilterActive, setIsTodayNewFilterActive] = useState(false);
+  const [dateRangeFilter, setDateRangeFilter] = useState<'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth' | 'custom'>('all');
+  const [customDateRange, setCustomDateRange] = useState<{ start: string; end: string }>({ start: '', end: '' });
+  const [statusFilter, setStatusFilter] = useState<'all' | LeadStatus>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all');
+  const [assignedFilter, setAssignedFilter] = useState<string>('all');
+  const [postFilter, setPostFilter] = useState<string>('all');
+  const [pageFilter, setPageFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name' | 'value'>('newest');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState<{ text: string; isDuplicate?: boolean; type?: 'success' | 'error' } | null>(null);
+  const [showDeleted, setShowDeleted] = useState(false);
+  const [toastMessage, setToastMessage] = useState<{ text: string; isDuplicate?: boolean; type?: 'success' | 'error'; onUndo?: () => void } | null>(null);
+
+  // Compute filtered leads
+  const filteredLeads = React.useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const todayDhaka = getDhakaDateString(new Date().toISOString());
+
+    return leads.filter((lead) => {
+      // 1. Source Tab
+      if (sourceFilter !== 'all') {
+        const sources = Array.isArray(lead.sources) && lead.sources.length > 0 ? lead.sources : [lead.source || 'facebook'];
+        const matchesSource = sources.includes(sourceFilter as LeadSource) || lead.source === sourceFilter;
+        if (!matchesSource) return false;
+      }
+
+      // 2. Search Query
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const nameMatch = (lead.name || '').toLowerCase().includes(q);
+        const phoneMatch = Boolean(
+          (lead.phone && String(lead.phone).includes(q)) ||
+          (lead.originalPhone && String(lead.originalPhone).includes(q))
+        );
+        const messengerMatch = Boolean(lead.messengerId && String(lead.messengerId).toLowerCase().includes(q));
+        const productMatch = (lead.productInterest || '').toLowerCase().includes(q);
+        if (!nameMatch && !phoneMatch && !messengerMatch && !productMatch) return false;
+      }
+
+      // 3. Status Filter
+      if (statusFilter !== 'all' && lead.status !== statusFilter) return false;
+
+      // 4. Tag Filter
+      if (tagFilter !== 'all') {
+        const tags = Array.isArray(lead.tags) ? lead.tags : [];
+        if (!tags.includes(tagFilter)) return false;
+      }
+
+      // 5. Assigned Filter
+      if (assignedFilter !== 'all') {
+        if (assignedFilter === 'unassigned') {
+          if (lead.assignedTo) return false;
+        } else if (lead.assignedTo !== assignedFilter) {
+          return false;
+        }
+      }
+
+      // 6. Follow-up Filter
+      if (isFollowUpFilterActive) {
+        const rawFollowUp = lead.followUpDate || lead.nextFollowUpDate;
+        const followUpStr = typeof rawFollowUp === 'string' ? rawFollowUp : '';
+        if (!followUpStr || !followUpStr.startsWith(today)) return false;
+      }
+
+      // 6.5. Today's New Filter (Asia/Dhaka timezone)
+      if (isTodayNewFilterActive) {
+        const leadDateDhaka = getDhakaDateString(lead.createdAt);
+        if (!leadDateDhaka || leadDateDhaka !== todayDhaka) return false;
+      }
+
+      // 7. Date Filter (New)
+      if (dateRangeFilter !== 'all') {
+        const leadDateDhaka = getDhakaDateString(lead.createdAt);
+        if (!leadDateDhaka) return false;
+        
+        let start = '', end = '';
+        if (dateRangeFilter === 'custom') {
+            start = customDateRange.start;
+            end = customDateRange.end;
+        } else {
+            const range = getDateRangeBoundaries(dateRangeFilter as any);
+            start = range.start;
+            end = range.end;
+        }
+        if (start && end && (leadDateDhaka < start || leadDateDhaka > end)) return false;
+      }
+
+      // 8. Post Filter
+      if (postFilter !== 'all' && lead.lastPostId !== postFilter) return false;
+
+      // 9. Page Filter
+      if (pageFilter !== 'all') {
+        const matchesPage = lead.pageId === pageFilter || lead.pageName === pageFilter;
+        if (!matchesPage) return false;
+      }
+
+      // Deleted Filter
+      if (lead.deleted && !showDeleted) return false;
+      if (!lead.deleted && showDeleted) return false;
+
+      return true;
+    }).sort((a,b) => {
+      if (sortBy === 'newest') {
+        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime() || 0;
+        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime() || 0;
+        return timeB - timeA;
+      }
+      if (sortBy === 'oldest') {
+        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime() || 0;
+        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime() || 0;
+        return timeA - timeB;
+      }
+      if (sortBy === 'name') return (a.name || '').localeCompare(b.name || '', 'bn');
+      if (sortBy === 'value') return (b.estimatedValue || 0) - (a.estimatedValue || 0);
+      return 0;
+    });
+  }, [leads, sourceFilter, searchQuery, statusFilter, isFollowUpFilterActive, isTodayNewFilterActive, dateRangeFilter, customDateRange, tagFilter, assignedFilter, postFilter, pageFilter, sortBy]);
+
+
 
   // Dark mode
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
@@ -159,11 +280,11 @@ export default function App() {
   };
 
   // Toast Notification helper
-  const showToast = (text: string, isDuplicate = false, type: 'success' | 'error' = 'success') => {
-    setToastMessage({ text, isDuplicate, type });
+  const showToast = (text: string, isDuplicate = false, type: 'success' | 'error' = 'success', onUndo?: () => void) => {
+    setToastMessage({ text, isDuplicate, type, onUndo });
     setTimeout(() => {
       setToastMessage(null);
-    }, 5000);
+    }, 10000);
   };
 
   // Actions
@@ -191,11 +312,17 @@ export default function App() {
 
   const handleDeleteLead = async (leadId: string): Promise<{ success: boolean; message: string }> => {
     try {
-      const res = await leadService.deleteLead(leadId);
+      const res = await leadService.softDeleteLead(leadId);
       if (res.success) {
         refreshLeads();
         if (selectedLead?.id === leadId) setSelectedLead(null);
-        showToast(res.message, false, 'success');
+        
+        showToast(res.message, false, 'success', async () => {
+            await leadService.restoreLead(leadId);
+            refreshLeads();
+            showToast('লিডটি ফেরত আনা হয়েছে');
+        });
+        
         return { success: true, message: res.message };
       } else {
         showToast(res.message, false, 'error');
@@ -215,16 +342,23 @@ export default function App() {
   };
 
   const handleExport = () => {
-    exportLeadsToCSV(leads, `unified-leads-${new Date().toISOString().split('T')[0]}.csv`);
+    exportLeadsToCSV(filteredLeads, `unified-leads-${new Date().toISOString().split('T')[0]}.csv`);
     showToast('সব লিড CSV ফরম্যাটে ডাউনলোড হয়েছে!');
   };
 
-  const handleResetDemo = async () => {
-    if (window.confirm('আপনি কি ১৬টি প্রাথমিক ডেমো লিড লোড করতে চান?')) {
-      await leadService.loadDemoLeads();
-      refreshLeads();
-      showToast('ডেমো ডেটাসেট সফলভাবে লোড করা হয়েছে');
-    }
+  const handleResetFilters = () => {
+    setSourceFilter('all');
+    setSearchQuery('');
+    setIsFollowUpFilterActive(false);
+    setIsTodayNewFilterActive(false);
+    setDateRangeFilter('all');
+    setCustomDateRange({ start: '', end: '' });
+    setStatusFilter('all');
+    setTagFilter('all');
+    setAssignedFilter('all');
+    setPostFilter('all');
+    setPageFilter('all');
+    showToast('ফিল্টার রিসেট হয়েছে');
   };
 
   // 1. Loading Splash while checking Firebase Auth state
@@ -302,7 +436,7 @@ export default function App() {
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           onExport={handleExport}
-          onResetDemo={handleResetDemo}
+          onResetFilters={() => setIsResetModalOpen(true)}
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
         />
@@ -319,11 +453,13 @@ export default function App() {
                 onSelectSource={(src) => setSourceFilter(src)}
                 isFollowUpFilterActive={isFollowUpFilterActive}
                 onToggleFollowUpFilter={() => setIsFollowUpFilterActive(!isFollowUpFilterActive)}
+                isTodayNewFilterActive={isTodayNewFilterActive}
+                onToggleTodayNewFilter={() => setIsTodayNewFilterActive(!isTodayNewFilterActive)}
               />
 
               {/* Main List and Card Views */}
               <LeadListView
-                leads={leads}
+                leads={filteredLeads}
                 onSelectLead={(lead) => setSelectedLead(lead)}
                 onQuickStatusChange={handleStatusChange}
                 onToggleStar={handleToggleStar}
@@ -334,6 +470,12 @@ export default function App() {
                 onOpenAddModal={() => setIsAddModalOpen(true)}
                 isFollowUpFilterActive={isFollowUpFilterActive}
                 onToggleFollowUpFilter={() => setIsFollowUpFilterActive(!isFollowUpFilterActive)}
+                isTodayNewFilterActive={isTodayNewFilterActive}
+                onToggleTodayNewFilter={() => setIsTodayNewFilterActive(!isTodayNewFilterActive)}
+                dateRangeFilter={dateRangeFilter}
+                onDateRangeFilterChange={setDateRangeFilter}
+                customDateRange={customDateRange}
+                onCustomDateRangeChange={setCustomDateRange}
                 firestoreError={firestoreError}
                 firestoreDebug={firestoreDebug}
                 onRetryFirestore={() => {
@@ -386,6 +528,8 @@ export default function App() {
               onLeadsUpdated={refreshLeads}
               onShowToast={(msg) => showToast(msg)}
               currentUser={currentUser}
+              showDeleted={showDeleted}
+              onShowDeletedChange={setShowDeleted}
             />
           )}
         </main>
@@ -406,6 +550,14 @@ export default function App() {
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
         onLeadAdded={handleLeadAdded}
+      />
+      <ResetOptionsModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        onResetFilters={handleResetFilters}
+        onLeadsUpdated={refreshLeads}
+        onShowToast={showToast}
+        leads={leads}
       />
 
       {/* Global Toast Notification */}
@@ -437,6 +589,17 @@ export default function App() {
           <div className="flex-1 text-xs font-medium leading-snug">
             {toastMessage.text}
           </div>
+          {toastMessage.onUndo && (
+            <button
+              onClick={() => {
+                toastMessage.onUndo?.();
+                setToastMessage(null);
+              }}
+              className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 underline"
+            >
+              আনডু
+            </button>
+          )}
           <button
             onClick={() => setToastMessage(null)}
             className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1"

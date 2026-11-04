@@ -9,7 +9,7 @@ interface TopHeaderProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onExport: () => void;
-  onResetDemo: () => void;
+  onResetFilters: () => void;
   isDarkMode?: boolean;
   onToggleDarkMode?: () => void;
 }
@@ -44,7 +44,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   searchQuery,
   onSearchChange,
   onExport,
-  onResetDemo,
+  onResetFilters,
   isDarkMode,
   onToggleDarkMode,
 }) => {
@@ -97,11 +97,11 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <span>এক্সপোর্ট</span>
         </button>
 
-        {/* Reset Demo leads button */}
+        {/* Reset Filters button */}
         <button
-          onClick={onResetDemo}
+          onClick={onResetFilters}
           className="hidden items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700/60 lg:inline-flex"
-          title="ডেমো ডেটা রিসেট"
+          title="ফিল্টার রিসেট"
         >
           <RotateCcw className="h-3.5 w-3.5 text-slate-400" />
           <span>রিসেট</span>

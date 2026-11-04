@@ -17,7 +17,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { Lead, LeadSource, LeadStatus } from '../../types/lead';
-import { FirestoreErrorPayload, FirestoreDebugInfo } from '../../services/leadService';
+import { FirestoreErrorPayload, FirestoreDebugInfo, getDhakaDateString } from '../../services/leadService';
 import { SourceBadge, FacebookIcon, MessengerIcon, WhatsAppIcon, WebsiteIcon, ManualIcon } from '../common/SourceBadge';
 import { StatusBadge } from '../common/StatusBadge';
 import { ChannelBadge, resolveMessageChannel } from '../common/ChannelBadge';
@@ -45,6 +45,12 @@ interface LeadListViewProps {
   onOpenAddModal: () => void;
   isFollowUpFilterActive: boolean;
   onToggleFollowUpFilter: () => void;
+  isTodayNewFilterActive: boolean;
+  onToggleTodayNewFilter: () => void;
+  dateRangeFilter: 'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth' | 'custom';
+  onDateRangeFilterChange: (range: 'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth' | 'custom') => void;
+  customDateRange: { start: string; end: string };
+  onCustomDateRangeChange: (range: { start: string; end: string }) => void;
   firestoreError?: FirestoreErrorPayload | null;
   onRetryFirestore?: () => void;
   firestoreDebug?: FirestoreDebugInfo | null;
@@ -62,6 +68,12 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
   onOpenAddModal,
   isFollowUpFilterActive,
   onToggleFollowUpFilter,
+  isTodayNewFilterActive,
+  onToggleTodayNewFilter,
+  dateRangeFilter,
+  onDateRangeFilterChange,
+  customDateRange,
+  onCustomDateRangeChange,
   firestoreError,
   onRetryFirestore,
   firestoreDebug,
@@ -74,6 +86,10 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
   const [pageFilter, setPageFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'name' | 'value'>('newest');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  
+  // Date filter states (now using props directly)
+
+
 
   // Compute unique posts for filter dropdown and lead counts
   const postMap: Record<string, { count: number; link?: string }> = {};
@@ -152,90 +168,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
   // Filtering Logic
   const today = new Date().toISOString().split('T')[0];
 
-  const filteredLeads = leads
-    .filter((lead) => {
-      // 1. Source Tab
-      if (sourceFilter !== 'all') {
-        const sources = Array.isArray(lead.sources) && lead.sources.length > 0 ? lead.sources : [lead.source || 'facebook'];
-        const matchesSource = sources.includes(sourceFilter as LeadSource) || lead.source === sourceFilter;
-        if (!matchesSource) return false;
-      }
-
-      // 2. Search Query (name or phone or messengerId or product)
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const nameMatch = (lead.name || '').toLowerCase().includes(q);
-        const phoneMatch = Boolean(
-          (lead.phone && String(lead.phone).includes(q)) ||
-          (lead.originalPhone && String(lead.originalPhone).includes(q))
-        );
-        const messengerMatch = Boolean(lead.messengerId && String(lead.messengerId).toLowerCase().includes(q));
-        const productMatch = (lead.productInterest || '').toLowerCase().includes(q);
-        if (!nameMatch && !phoneMatch && !messengerMatch && !productMatch) return false;
-      }
-
-
-      // 3. Status Filter
-      if (statusFilter !== 'all' && lead.status !== statusFilter) {
-        return false;
-      }
-
-      // 4. Tag Filter
-      if (tagFilter !== 'all') {
-        const tags = Array.isArray(lead.tags) ? lead.tags : [];
-        if (!tags.includes(tagFilter)) return false;
-      }
-
-      // 5. Assigned Filter
-      if (assignedFilter !== 'all') {
-        if (assignedFilter === 'unassigned') {
-          if (lead.assignedTo) return false;
-        } else if (lead.assignedTo !== assignedFilter) {
-          return false;
-        }
-      }
-
-      // 6. Follow-up Filter
-      if (isFollowUpFilterActive) {
-        const rawFollowUp = lead.followUpDate || lead.nextFollowUpDate;
-        const followUpVal = typeof rawFollowUp === 'string' ? rawFollowUp : '';
-        if (!followUpVal || !followUpVal.startsWith(today)) {
-          return false;
-        }
-      }
-
-      // 7. Post Filter
-      if (postFilter !== 'all' && lead.lastPostId !== postFilter) {
-        return false;
-      }
-
-      // 8. Page Filter
-      if (pageFilter !== 'all') {
-        const matchesPage = lead.pageId === pageFilter || lead.pageName === pageFilter;
-        if (!matchesPage) return false;
-      }
-
-      return true;
-    })
-    .sort((a, b) => {
-      if (sortBy === 'newest') {
-        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime() || 0;
-        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime() || 0;
-        return timeB - timeA;
-      }
-      if (sortBy === 'oldest') {
-        const timeA = new Date(a.lastMessageAt || a.createdAt).getTime() || 0;
-        const timeB = new Date(b.lastMessageAt || b.createdAt).getTime() || 0;
-        return timeA - timeB;
-      }
-      if (sortBy === 'name') {
-        return (a.name || '').localeCompare(b.name || '', 'bn');
-      }
-      if (sortBy === 'value') {
-        return (b.estimatedValue || 0) - (a.estimatedValue || 0);
-      }
-      return 0;
-    });
+  const filteredLeads = leads;
 
   const clearAllFilters = () => {
     onSourceFilterChange('all');
@@ -248,6 +181,9 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
     if (isFollowUpFilterActive) {
       onToggleFollowUpFilter();
     }
+    if (isTodayNewFilterActive) {
+      onToggleTodayNewFilter();
+    }
   };
 
   const hasActiveFilters =
@@ -258,7 +194,8 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
     assignedFilter !== 'all' ||
     postFilter !== 'all' ||
     pageFilter !== 'all' ||
-    isFollowUpFilterActive;
+    isFollowUpFilterActive ||
+    isTodayNewFilterActive;
 
   return (
     <div className="space-y-4">
@@ -319,6 +256,58 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
               ))}
             </select>
           </div>
+
+          {/* Quick Date Filter Dropdown */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 hidden sm:inline whitespace-nowrap">
+              তারিখ:
+            </span>
+            <div className="relative">
+              <select
+                value={dateRangeFilter}
+                onChange={(e) => onDateRangeFilterChange(e.target.value as any)}
+                className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition-all focus:outline-hidden ${
+                  dateRangeFilter !== 'all'
+                    ? 'border-blue-400 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-950/70 dark:text-blue-300'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                }`}
+              >
+                <option value="all">সব সময়</option>
+                <option value="today">আজ</option>
+                <option value="yesterday">গতকাল</option>
+                <option value="last7days">গত ৭ দিন</option>
+                <option value="thisMonth">এই মাস</option>
+                <option value="lastMonth">গত মাস</option>
+                <option value="custom">কাস্টম তারিখ</option>
+              </select>
+              {dateRangeFilter !== 'all' && (
+                <button
+                  onClick={() => onDateRangeFilterChange('all')}
+                  className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-slate-200 text-slate-600 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200"
+                  title="ফিল্টার মুছুন"
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </div>
+          </div>
+          {dateRangeFilter === 'custom' && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={customDateRange.start}
+                onChange={(e) => onCustomDateRangeChange({ ...customDateRange, start: e.target.value })}
+                className="rounded-lg border border-slate-200 p-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+              />
+              <span className="text-xs text-slate-500">থেকে</span>
+              <input
+                type="date"
+                value={customDateRange.end}
+                onChange={(e) => onCustomDateRangeChange({ ...customDateRange, end: e.target.value })}
+                className="rounded-lg border border-slate-200 p-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+              />
+            </div>
+          )}
 
           {/* Advanced Filter Button */}
           <button

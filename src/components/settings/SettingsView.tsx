@@ -24,6 +24,7 @@ import {
 import { Lead } from '../../types/lead';
 import { leadService } from '../../services/leadService';
 import { authService, AdminUser } from '../../services/authService';
+import { exportLeadsToCSV } from '../../utils/formatters';
 import {
   getSavedFirebaseConfig,
   saveFirebaseConfig,
@@ -39,6 +40,8 @@ interface SettingsViewProps {
   onLeadsUpdated: () => void;
   onShowToast: (msg: string) => void;
   currentUser?: AdminUser | null;
+  showDeleted: boolean;
+  onShowDeletedChange: (show: boolean) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -46,6 +49,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onLeadsUpdated,
   onShowToast,
   currentUser,
+  showDeleted,
+  onShowDeletedChange,
 }) => {
   const activeUser = currentUser || authService.getCurrentUser();
   const [teamMembers, setTeamMembers] = useState<string[]>(TEAM_MEMBERS);
@@ -603,6 +608,27 @@ service cloud.firestore {
             </span>
             <span className="text-[11px] text-slate-500 mt-0.5">ফাইল হিসেবে ব্যাকআপ নিন</span>
           </button>
+          
+          {/* Requirement 3: Delete All Data to Trash */}
+          <button
+            onClick={async () => {
+                const confirmText = prompt('আপনি কি নিশ্চিত? সব লিড মুছে ট্র্যাশে পাঠানো হবে। নিশ্চিত করতে "মুছুন" টাইপ করুন:');
+                if (confirmText === 'মুছুন') {
+                    // Backup
+                    exportLeadsToCSV(leads, `leads-backup-${new Date().toISOString().split('T')[0]}.csv`);
+                    await leadService.bulkSoftDeleteLeads(leads.filter(l => !l.deleted).map(l => l.id));
+                    onLeadsUpdated();
+                    onShowToast('সব লিড ট্র্যাশে পাঠানো হয়েছে!');
+                }
+            }}
+            className="flex flex-col items-center justify-center rounded-xl border border-rose-200 bg-rose-50/40 p-4 text-center hover:border-rose-500 hover:bg-rose-50 transition dark:border-rose-900/60 dark:bg-rose-950/20"
+          >
+            <Trash2 className="h-5 w-5 text-rose-600 mb-1.5" />
+            <span className="text-xs font-bold text-rose-700 dark:text-rose-400">
+              সব লিড মুছে ফেলুন
+            </span>
+            <span className="text-[11px] text-slate-500 mt-0.5">সব ডেটা ট্র্যাশে পাঠান</span>
+          </button>
         </div>
       </div>
 
@@ -703,6 +729,51 @@ service cloud.firestore {
           </button>
         </form>
       </div>
+      {/* 6. Trash Section */}
+      <div className="rounded-xl border border-rose-200/50 bg-rose-50/20 p-5 shadow-2xs dark:border-rose-900/50 dark:bg-rose-950/20 space-y-4">
+        <div className="flex items-center justify-between border-b border-rose-200/50 pb-3 dark:border-rose-900/50">
+          <div className="flex items-center gap-2">
+            <Trash2 className="h-4 w-4 text-rose-600" />
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+              ট্র্যাশ (মোছা লিডসমূহ)
+            </h3>
+          </div>
+          {leads.filter(l => l.deleted).length > 0 && (
+            <button onClick={async () => {
+              for (const lead of leads.filter(l => l.deleted)) {
+                await leadService.restoreLead(lead.id);
+              }
+              onLeadsUpdated();
+              onShowToast('সব লিড ফেরত আনা হয়েছে!');
+            }} className="text-xs font-bold text-blue-600">সব ফেরত আনুন</button>
+          )}
+        </div>
+        <div className="space-y-2">
+          {leads.filter(l => l.deleted).map(lead => (
+            <div key={lead.id} className="flex justify-between items-center text-xs p-2 bg-white dark:bg-slate-900 rounded-lg">
+                <span className="font-semibold">{lead.name}</span>
+                <div className="flex gap-3">
+                  <button onClick={async () => {
+                    await leadService.restoreLead(lead.id);
+                    onLeadsUpdated();
+                    onShowToast('লিডটি ফেরত আনা হয়েছে!');
+                  }} className="text-blue-600 font-bold">ফেরত আনুন</button>
+                  <button onClick={async () => {
+                     if (window.confirm('আপনি কি নিশ্চিত? এটি স্থায়ীভাবে মুছে যাবে।')) {
+                        await leadService.permanentlyDeleteLead(lead.id);
+                        onLeadsUpdated();
+                        onShowToast('লিডটি স্থায়ীভাবে মুছে ফেলা হয়েছে!');
+                     }
+                  }} className="text-rose-600 font-bold">স্থায়ীভাবে মুছুন</button>
+                </div>
+            </div>
+          ))}
+          {leads.filter(l => l.deleted).length === 0 && (
+            <p className="text-xs text-slate-500 italic">ট্র্যাশ খালি</p>
+          )}
+        </div>
+      </div>
+
     </div>
   );
 };

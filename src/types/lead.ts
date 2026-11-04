@@ -49,6 +49,8 @@ export interface Lead {
   lastSeenAt?: string;        // ISO string timestamp when admin last viewed/read latest message
   pageId?: string;            // Facebook Page ID where interaction occurred
   pageName?: string;          // Facebook Page Name
+  deleted?: boolean;
+  deletedAt?: string;
 }
 
 export interface LeadFilterState {

@@ -136,6 +136,67 @@ export function safeToIsoString(val: any, fallback?: string): string {
 }
 
 /**
+ * Returns YYYY-MM-DD date string in Asia/Dhaka timezone for any valid date value.
+ */
+export function getDhakaDateString(isoString?: string | null): string {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Dhaka',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(d);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Returns ISO date strings for start and end of various date ranges in Asia/Dhaka timezone.
+ */
+export function getDateRangeBoundaries(
+  range: 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth'
+): { start: string; end: string } {
+  const now = new Date();
+  const tz = 'Asia/Dhaka';
+  
+  const getD = (d: Date) => d.toLocaleString('en-CA', { timeZone: tz }).split(',')[0];
+
+  switch (range) {
+    case 'today': {
+      const d = getD(now);
+      return { start: d, end: d };
+    }
+    case 'yesterday': {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 1);
+      const dy = getD(d);
+      return { start: dy, end: dy };
+    }
+    case 'last7days': {
+      const end = new Date(now);
+      const start = new Date(now);
+      start.setDate(start.getDate() - 6);
+      return { start: getD(start), end: getD(end) };
+    }
+    case 'thisMonth': {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start: getD(start), end: getD(now) };
+    }
+    case 'lastMonth': {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end = new Date(now.getFullYear(), now.getMonth(), 0);
+      return { start: getD(start), end: getD(end) };
+    }
+    default:
+      return { start: '', end: '' };
+  }
+}
+
+/**
  * Normalizes any raw source into a valid LeadSource ('facebook' | 'messenger' | 'whatsapp' | 'manual')
  */
 export function normalizeLeadSource(src?: any, hasMessengerId?: boolean): LeadSource {
@@ -1097,9 +1158,27 @@ class LeadService {
   }
 
   /**
-   * Deletes a lead from Firestore (and local state)
+   * Soft deletes a lead
    */
-  public async deleteLead(leadId: string): Promise<{ success: boolean; message: string; error?: any }> {
+  public async softDeleteLead(leadId: string): Promise<{ success: boolean; message: string; error?: any }> {
+    return this.updateLead(leadId, { deleted: true, deletedAt: new Date().toISOString() }, 'অ্যাডমিন')
+      .then(() => ({ success: true, message: 'লিডটি ট্র্যাশে পাঠানো হয়েছে!' }))
+      .catch((err) => ({ success: false, message: 'লিড মুছতে ব্যর্থ হয়েছে', error: err }));
+  }
+
+  /**
+   * Restores a soft-deleted lead
+   */
+  public async restoreLead(leadId: string): Promise<{ success: boolean; message: string; error?: any }> {
+    return this.updateLead(leadId, { deleted: false, deletedAt: undefined }, 'অ্যাডমিন')
+      .then(() => ({ success: true, message: 'লিডটি ফেরত আনা হয়েছে!' }))
+      .catch((err) => ({ success: false, message: 'লিড ফেরত আনতে ব্যর্থ হয়েছে', error: err }));
+  }
+
+  /**
+   * Permanently deletes a lead from Firestore
+   */
+  public async permanentlyDeleteLead(leadId: string): Promise<{ success: boolean; message: string; error?: any }> {
     const { db } = initializeFirebaseInstances();
     const isFb = isFirebaseConfigured();
     const uid = this.getActiveUserId();
@@ -1108,27 +1187,31 @@ class LeadService {
       try {
         await deleteDoc(doc(db, 'users', uid, 'leads', leadId));
       } catch (err: any) {
-        console.error('Failed to delete lead from Firestore:', err);
-        let errorDetails = err?.message || 'অজানা ত্রুটি';
-        if (err?.code === 'permission-denied' || String(err).includes('permission-denied')) {
-          errorDetails = 'অনুমতি নেই (permission-denied): Firestore Security Rules এ ডিলিট করার পারমিশন মেলেনি।';
-        }
-        return {
-          success: false,
-          message: `Firestore থেকে লিড মুছতে ব্যর্থ হয়েছে: ${errorDetails}`,
-          error: err,
-        };
+        return { success: false, message: 'Firestore থেকে স্থায়ীভাবে মুছতে ব্যর্থ হয়েছে', error: err };
       }
     }
-
     const leads = this.getLeads(uid);
     const filtered = leads.filter((l) => l.id !== leadId);
     this.saveLeads(filtered, uid);
+    return { success: true, message: 'লিডটি স্থায়ীভাবে মুছে ফেলা হয়েছে!' };
+  }
 
-    return {
-      success: true,
-      message: 'লিডটি সফলভাবে মুছে ফেলা হয়েছে!',
-    };
+  /**
+   * Bulk soft delete
+   */
+  public async bulkSoftDeleteLeads(leadIds: string[]): Promise<void> {
+    const promises = leadIds.map(id => this.softDeleteLead(id));
+    await Promise.all(promises);
+  }
+
+  /**
+   * Permanently delete all leads in trash
+   */
+  public async permanentlyDeleteAllTrash(): Promise<void> {
+    const leads = this.getLeads();
+    const trash = leads.filter(l => l.deleted);
+    const promises = trash.map(l => this.permanentlyDeleteLead(l.id));
+    await Promise.all(promises);
   }
 
   /**
@@ -1216,7 +1299,7 @@ class LeadService {
    * Calculates dashboard summary statistics
    */
   public getSummaryStats(leads: Lead[]): SummaryStats {
-    const today = new Date().toISOString().split('T')[0];
+    const todayDhaka = getDhakaDateString(new Date().toISOString());
 
     let todayNewLeads = 0;
     let facebookCount = 0;
@@ -1238,14 +1321,15 @@ class LeadService {
       if (sourcesArr.includes('website') || l.source === 'website') websiteCount++;
       if (sourcesArr.includes('manual') || l.source === 'manual') manualCount++;
 
-      const createdStr = typeof l.createdAt === 'string' ? l.createdAt : safeToIsoString(l.createdAt);
-      if (createdStr.startsWith(today)) {
+      const leadDateDhaka = getDhakaDateString(l.createdAt);
+      if (leadDateDhaka && leadDateDhaka === todayDhaka) {
         todayNewLeads++;
       }
 
       const rawFollowUp = l.followUpDate || l.nextFollowUpDate;
       const followUpStr = typeof rawFollowUp === 'string' ? rawFollowUp : '';
-      if (followUpStr && followUpStr.startsWith(today) && l.status !== 'won' && l.status !== 'lost') {
+      const followUpDateDhaka = getDhakaDateString(followUpStr);
+      if (followUpDateDhaka && followUpDateDhaka === todayDhaka && l.status !== 'won' && l.status !== 'lost') {
         todayFollowUpCount++;
       }
 
