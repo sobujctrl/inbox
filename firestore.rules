@@ -2,40 +2,54 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+    function isBot() {
+      return request.auth != null && request.auth.token.email == 'n8nbot@leadinbox.app';
     }
 
-    // Per-user leads subcollection:
-    // Only the authenticated user matching {userId} can read, list, create, update, and delete their own leads.
-    match /users/{userId}/leads/{leadId} {
-      allow read, write: if isOwner(userId);
+    // Check if user is admin or in allowed members list in /config/team
+    function isAuthorizedTeamMember() {
+      let teamDoc = get(/databases/$(database)/documents/config/team);
+      let email = request.auth.token.email.lower();
+      return isSignedIn() && (
+        email == teamDoc.data.adminEmail ||
+        email in teamDoc.data.members
+      );
     }
 
-    // Per-user connected Facebook pages subcollection:
-    match /users/{userId}/pages/{pageId} {
-      allow read, write: if isOwner(userId);
+    function isAdmin() {
+      let teamDoc = get(/databases/$(database)/documents/config/team);
+      let email = request.auth.token.email.lower();
+      return isSignedIn() && email == teamDoc.data.adminEmail;
     }
 
-    // Page owner mapping (used by n8n and app):
-    // Authenticated users can claim/update their own page mapping or delete it.
-    match /pageOwners/{pageId} {
+    // 1. Shared Leads Collection
+    match /sharedLeads/{leadId} {
+      allow read, create, update: if isBot() || isAuthorizedTeamMember();
+      allow delete: if isAdmin() || isBot();
+    }
+
+    // 2. Team Config Document
+    match /config/team {
       allow read: if isSignedIn();
-      allow create, update: if isSignedIn() && (request.resource.data.uid == request.auth.uid);
-      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid);
+      allow write: if isSignedIn() && (
+        resource == null || 
+        request.auth.token.email.lower() == resource.data.adminEmail
+      );
     }
 
-    // User settings / profile document (if used)
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
+    // 3. User Connected Pages (for n8n & pages)
+    match /users/{userId}/pages/{pageId} {
+      allow read, write: if isBot() || isSignedIn();
     }
 
-    // Global default-deny catch-all
+    match /pageOwners/{pageId} {
+      allow read, write: if isBot() || isSignedIn();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

@@ -9,7 +9,7 @@ export const ALLOWED_EMAILS: string[] = [];
  * যেকোনো বৈধ ইমেইলকে প্রবেশের অনুমতি দেয়
  */
 export function isEmailAllowed(email?: string | null): boolean {
-  return Boolean(email && email.trim().length > 0);
+ return Boolean(email && email.trim().length > 0);
 }
 
 /**

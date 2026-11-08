@@ -1,17 +1,14 @@
 import React from 'react';
+import { Badge } from './Badge';
 
 export type MessageChannelType = 'comment' | 'messenger' | 'whatsapp' | string;
 
 interface ChannelBadgeProps {
   channel?: MessageChannelType | null;
-  size?: 'xs' | 'sm';
+  size?: 'xs' | 'sm' | 'md';
   className?: string;
 }
 
-/**
- * Resolves lead's message channel strictly from the lastChannel field.
- * Does NOT guess from sources, lastPostLink, messengerId, or other fields.
- */
 export const resolveMessageChannel = (
   channel?: string | null,
   fallback?: {
@@ -37,7 +34,6 @@ export const resolveMessageChannel = (
 
 export const ChannelBadge: React.FC<ChannelBadgeProps> = ({
   channel,
-  size = 'xs',
   className = '',
 }) => {
   if (!channel) return null;
@@ -48,38 +44,25 @@ export const ChannelBadge: React.FC<ChannelBadgeProps> = ({
 
   if (!isComment && !isMessenger && !isWhatsApp) return null;
 
-  const sizeClasses = size === 'xs' 
-    ? 'text-[10px] px-1.5 py-0.5 gap-1' 
-    : 'text-[11px] px-2 py-0.5 gap-1.5';
-
   if (isComment) {
     return (
-      <span
-        className={`inline-flex items-center font-bold rounded-md border border-amber-300/80 bg-amber-100 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/60 dark:text-amber-300 shadow-2xs whitespace-nowrap ${sizeClasses} ${className}`}
-        title="Facebook কমেন্ট থেকে প্রাপ্ত বার্তা"
-      >
-        <span>💬 কমেন্ট</span>
-      </span>
+      <Badge variant="amber" title="Facebook কমেন্ট থেকে প্রাপ্ত বার্তা" className={className}>
+        💬 কমেন্ট
+      </Badge>
     );
   }
 
   if (isMessenger) {
     return (
-      <span
-        className={`inline-flex items-center font-bold rounded-md border border-blue-200 bg-blue-100 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/60 dark:text-blue-300 shadow-2xs whitespace-nowrap ${sizeClasses} ${className}`}
-        title="Messenger ইনবক্স থেকে প্রাপ্ত বার্তা"
-      >
-        <span>✉️ মেসেঞ্জার</span>
-      </span>
+      <Badge variant="teal" title="Messenger ইনবক্স থেকে প্রাপ্ত বার্তা" className={className}>
+        ✉️ মেসেঞ্জার
+      </Badge>
     );
   }
 
   return (
-    <span
-      className={`inline-flex items-center font-bold rounded-md border border-emerald-300/80 bg-emerald-100 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 shadow-2xs whitespace-nowrap ${sizeClasses} ${className}`}
-      title="WhatsApp থেকে প্রাপ্ত বার্তা"
-    >
-      <span>WhatsApp</span>
-    </span>
+    <Badge variant="green" title="WhatsApp থেকে প্রাপ্ত বার্তা" className={className}>
+      🟢 WhatsApp
+    </Badge>
   );
 };
