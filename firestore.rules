@@ -1,55 +1,58 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
+    
+    // 1. Helper functions
     function isSignedIn() {
       return request.auth != null;
     }
-
+    
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email.lower() == 'sobujbd679@gmail.com';
+    }
+    
     function isBot() {
-      return request.auth != null && request.auth.token.email == 'n8nbot@leadinbox.app';
+      return isSignedIn() && (request.auth.token.email.lower() == 'n8nbot@leadinbox.app' || request.auth.token.firebase.sign_in_provider == 'custom');
     }
 
-    // Check if user is admin or in allowed members list in /config/team
     function isAuthorizedTeamMember() {
-      let teamDoc = get(/databases/$(database)/documents/config/team);
-      let email = request.auth.token.email.lower();
       return isSignedIn() && (
-        email == teamDoc.data.adminEmail ||
-        email in teamDoc.data.members
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/config/team) && (
+          request.auth.token.email.lower() in get(/databases/$(database)/documents/config/team).data.memberEmails ||
+          request.auth.token.email.lower() == get(/databases/$(database)/documents/config/team).data.adminEmail.lower()
+        ))
       );
     }
 
-    function isAdmin() {
-      let teamDoc = get(/databases/$(database)/documents/config/team);
-      let email = request.auth.token.email.lower();
-      return isSignedIn() && email == teamDoc.data.adminEmail;
-    }
-
-    // 1. Shared Leads Collection
+    // 2. sharedLeads collection: Read & Write for Admin, Authorized Team Members, or n8n Bot
+    // Delete is strictly restricted to Admin (or Bot)
     match /sharedLeads/{leadId} {
-      allow read, create, update: if isBot() || isAuthorizedTeamMember();
+      allow read, create, update: if isAuthorizedTeamMember() || isBot();
       allow delete: if isAdmin() || isBot();
     }
 
-    // 2. Team Config Document
+    // 3. config/team: Read for signed-in users (to verify permissions), Write only for Admin
     match /config/team {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && (
-        resource == null || 
-        request.auth.token.email.lower() == resource.data.adminEmail
-      );
+      allow write: if isAdmin();
     }
 
-    // 3. User Connected Pages (for n8n & pages)
-    match /users/{userId}/pages/{pageId} {
-      allow read, write: if isBot() || isSignedIn();
-    }
-
+    // 4. pageOwners: Facebook Webhook & n8n mapping
     match /pageOwners/{pageId} {
-      allow read, write: if isBot() || isSignedIn();
+      allow read, write: if isSignedIn() || isBot();
     }
 
+    // 5. Legacy & per-user collections
+    match /users/{userId}/{document=**} {
+      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin() || isBot());
+    }
+
+    match /teamMembers/{memberEmail} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Default deny for unmatched collections
     match /{document=**} {
       allow read, write: if false;
     }

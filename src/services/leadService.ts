@@ -1,9 +1,46 @@
+
+export function removeUndefined(obj: any): any {
+  if (obj === undefined || obj === null) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(removeUndefined);
+  }
+  const cleaned: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (val !== undefined) {
+      cleaned[key] = removeUndefined(val);
+    } else {
+      cleaned[key] = null;
+    }
+  }
+  return cleaned;
+}
+
+export function cleanData(obj: any): any {
+  if (obj === undefined || obj === null) return null;
+  if (typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(cleanData);
+  }
+  const cleaned: Record<string, any> = {};
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    if (val !== undefined) {
+      cleaned[key] = cleanData(val);
+    } else {
+      cleaned[key] = null;
+    }
+  }
+  return cleaned;
+}
 import {
  collection,
  doc,
  setDoc,
  deleteDoc,
  getDocs,
+ getDocsFromServer,
  onSnapshot,
  query,
  where,
@@ -53,6 +90,11 @@ export interface FirestoreDebugInfo {
  errorCode?: string;
  errorMessage?: string;
  lastUpdated: string;
+ isFirebaseConfigured?: boolean;
+ hasDb?: boolean;
+ listenerActive?: boolean;
+ lastCallTime?: string;
+ lastCallUserId?: string;
 }
 
 const STORAGE_KEY = 'unified_lead_inbox_leads_v1';
@@ -109,6 +151,31 @@ export function isLeadNew(lead?: Lead | null, userId?: string | null, baseline =
   const baselineTime = new Date(baseline).getTime();
   if (isNaN(leadTime) || isNaN(baselineTime)) return false;
   return leadTime >= baselineTime;
+}
+
+/**
+ * Returns all unique sources for a lead. Always checks lead.sources first,
+ * falling back to [lead.source || 'facebook'].
+ */
+export function getLeadSources(lead?: Lead | null): LeadSource[] {
+  if (!lead) return ['facebook'];
+  if (Array.isArray(lead.sources) && lead.sources.length > 0) {
+    const list = lead.sources.filter(Boolean) as LeadSource[];
+    if (list.length > 0) return Array.from(new Set(list));
+  }
+  return [lead.source || 'facebook'];
+}
+
+/**
+ * Unified Source Matching Function:
+ * Checks whether a lead belongs to a specific source by inspecting lead.sources (or lead.source).
+ * A lead with multiple sources (e.g. ['facebook', 'messenger']) counts towards each of its sources.
+ */
+export function leadMatchesSource(lead?: Lead | null, source?: string | null): boolean {
+  if (!lead) return false;
+  if (!source || source === 'all') return true;
+  const sources = getLeadSources(lead);
+  return sources.includes(source as LeadSource) || lead.source === source;
 }
 
 export interface MonthOption {
@@ -320,7 +387,7 @@ export function normalizeLeadSource(src?: any, hasMessengerId?: boolean): LeadSo
  if (s.includes('whatsapp') || s === 'wa') return 'whatsapp';
  if (s.includes('web') || s.includes('ওয়েবসাইট') || s === 'site') return 'website';
  if (s.includes('manual') || s === 'offline') return 'manual';
- if (s.includes('face') || s.includes('fb') || s.includes('meta') || s.includes('comment')) return 'facebook';
+ if (s.includes('face') || s.includes('fb') || s.includes('meta') || s.includes('comment') || s === 'facebook') return 'facebook';
  return hasMessengerId ? 'messenger' : 'facebook';
 }
 
@@ -662,7 +729,7 @@ class LeadService {
  }
 
  /**
- * Real-time Firestore subscription via onSnapshot for users/{uid}/leads.
+ * Real-time Firestore subscription via onSnapshot for sharedLeads.
  * If Firestore is configured, attaches a real-time listener to the logged-in user's subcollection.
  * Any lead written by n8n or webhooks is automatically normalized and safely rendered with defaults.
  * Emits debugInfo containing UID, database ID, path, docCount, and error info.
@@ -678,16 +745,16 @@ class LeadService {
  const { db, auth } = initializeFirebaseInstances();
  const uid = userId || this.getActiveUserId() || auth?.currentUser?.uid || '';
  const activeDbId = getActiveDatabaseId();
- const collectionPath = uid ? `users/${uid}/leads` : 'users/{uid}/leads';
+ const collectionPath = uid ? `sharedLeads` : 'sharedLeads';
 
  if (isFirebaseConfigured() && db && uid) {
  try {
- const leadsCol = collection(db, 'users', uid, 'leads');
+ const leadsCol = collection(db, 'sharedLeads');
  const unsubscribe = onSnapshot(
  leadsCol,
  (snapshot) => {
  const firestoreLeads: Lead[] = [];
- snapshot.forEach((docSnapshot) => {
+  snapshot.forEach((docSnapshot) => {
  const data = docSnapshot.data() as any;
  const leadItem = normalizeFirestoreLead(docSnapshot.id, data);
  firestoreLeads.push(leadItem);
@@ -1034,11 +1101,11 @@ class LeadService {
  existing.notes = [newNote, ...existing.notes];
  }
 
- // Sync to Firestore under users/{uid}/leads
+ // Sync to Firestore under sharedLeads
  const uid = this.getActiveUserId();
  if (isFirebaseConfigured() && db && uid) {
  try {
- await setDoc(doc(db, 'users', uid, 'leads', existing.id), existing, { merge: true });
+ await setDoc(doc(db, 'sharedLeads', existing.id), removeUndefined(existing), { merge: true });
  } catch (e) {
  console.error('Failed to sync merged lead to Firestore:', e);
  }
@@ -1113,11 +1180,11 @@ class LeadService {
  createdBy: this.currentOperator ? { uid: this.currentOperator.uid, name: this.currentOperator.name } : undefined,
  };
 
- // Sync to Firestore under users/{uid}/leads
+ // Sync to Firestore under sharedLeads
  const uid = this.getActiveUserId();
  if (isFirebaseConfigured() && db && uid) {
  try {
- await setDoc(doc(db, 'users', uid, 'leads', newLead.id), newLead);
+ await setDoc(doc(db, 'sharedLeads', newLead.id), removeUndefined(newLead));
  } catch (e) {
  console.error('Failed to save new lead to Firestore:', e);
  }
@@ -1276,7 +1343,7 @@ class LeadService {
  const { db } = initializeFirebaseInstances();
  if (db) {
  try {
- await setDoc(doc(db, 'users', uid, 'leads', id), updatedLead, { merge: true });
+ await setDoc(doc(db, 'sharedLeads', id), removeUndefined(updatedLead), { merge: true });
  } catch (e) {
  console.error('Failed to sync updated lead to Firestore:', e);
  }
@@ -1360,7 +1427,7 @@ class LeadService {
  if (isFirebaseConfigured() && uid) {
  const { db } = initializeFirebaseInstances();
  if (db) {
- await deleteDoc(doc(db, 'users', uid, 'leads', leadId));
+ await deleteDoc(doc(db, 'sharedLeads', leadId));
  }
  }
 
@@ -1403,7 +1470,7 @@ class LeadService {
  if (db) {
  const batch = writeBatch(db);
  leads.forEach((l) => {
- batch.delete(doc(db, 'users', uid, 'leads', l.id));
+ batch.delete(doc(db, 'sharedLeads', l.id));
  });
  await batch.commit();
  }
@@ -1428,7 +1495,7 @@ class LeadService {
  if (db) {
  const batch = writeBatch(db);
  leadsToDelete.forEach((l) => {
- batch.delete(doc(db, 'users', uid, 'leads', l.id));
+ batch.delete(doc(db, 'sharedLeads', l.id));
  });
  await batch.commit();
  }
@@ -1455,7 +1522,7 @@ class LeadService {
  if (db) {
  const batch = writeBatch(db);
  uniqueDemo.forEach((l) => {
- batch.set(doc(db, 'users', uid, 'leads', l.id), l);
+ batch.set(doc(db, 'sharedLeads', l.id), removeUndefined(l));
  });
  await batch.commit();
  }
@@ -1574,20 +1641,20 @@ class LeadService {
  cancelledValue: active.filter(l => l.status === 'cancelled').reduce((sum, l) => sum + (l.estimatedValue || 0), 0),
 
  // Source based "New" counts
- newFacebookCount: newLeads.filter(l => l.source === 'facebook').length,
- totalFacebookCount: active.filter(l => l.source === 'facebook').length,
+ newFacebookCount: newLeads.filter(l => leadMatchesSource(l, 'facebook')).length,
+ totalFacebookCount: active.filter(l => leadMatchesSource(l, 'facebook')).length,
 
- newMessengerCount: newLeads.filter(l => l.source === 'messenger').length,
- totalMessengerCount: active.filter(l => l.source === 'messenger').length,
+ newMessengerCount: newLeads.filter(l => leadMatchesSource(l, 'messenger')).length,
+ totalMessengerCount: active.filter(l => leadMatchesSource(l, 'messenger')).length,
 
- newWhatsappCount: newLeads.filter(l => l.source === 'whatsapp').length,
- totalWhatsappCount: active.filter(l => l.source === 'whatsapp').length,
+ newWhatsappCount: newLeads.filter(l => leadMatchesSource(l, 'whatsapp')).length,
+ totalWhatsappCount: active.filter(l => leadMatchesSource(l, 'whatsapp')).length,
 
- newWebsiteCount: newLeads.filter(l => l.source === 'website').length,
- totalWebsiteCount: active.filter(l => l.source === 'website').length,
+ newWebsiteCount: newLeads.filter(l => leadMatchesSource(l, 'website')).length,
+ totalWebsiteCount: active.filter(l => leadMatchesSource(l, 'website')).length,
 
- newManualCount: newLeads.filter(l => l.source === 'manual').length,
- totalManualCount: active.filter(l => l.source === 'manual').length,
+ newManualCount: newLeads.filter(l => leadMatchesSource(l, 'manual')).length,
+ totalManualCount: active.filter(l => leadMatchesSource(l, 'manual')).length,
 
  // 3 "Total" only boxes
  totalPendingCount: active.filter(l => ['new', 'contacted', 'followup', 'pending'].includes(l.status)).length,
@@ -1603,11 +1670,11 @@ class LeadService {
   const fu = getDhakaDateString(l.followUpDate || l.nextFollowUpDate);
   return fu && fu < todayDhaka && !['won', 'cancelled', 'hold'].includes(l.status);
  }).length,
- facebookCount: active.filter(l => l.source === 'facebook').length,
- messengerCount: active.filter(l => l.source === 'messenger').length,
- whatsappCount: active.filter(l => l.source === 'whatsapp').length,
- websiteCount: active.filter(l => l.source === 'website').length,
- manualCount: active.filter(l => l.source === 'manual').length,
+ facebookCount: active.filter(l => leadMatchesSource(l, 'facebook')).length,
+ messengerCount: active.filter(l => leadMatchesSource(l, 'messenger')).length,
+ whatsappCount: active.filter(l => leadMatchesSource(l, 'whatsapp')).length,
+ websiteCount: active.filter(l => leadMatchesSource(l, 'website')).length,
+ manualCount: active.filter(l => leadMatchesSource(l, 'manual')).length,
  wonCount: active.filter(l => l.status === 'won' || l.status === 'confirmed').length,
  cancelledCount: active.filter(l => l.status === 'cancelled').length,
  holdCount: active.filter(l => l.status === 'hold').length,
@@ -1623,113 +1690,147 @@ class LeadService {
  /**
   * Team member management
   */
- public async addTeamMember(email: string, name: string, ownerUid: string, addedBy: string): Promise<void> {
-   const { db } = initializeFirebaseInstances();
-   if (!db) return;
-   
-   const lowerEmail = email.toLowerCase().trim();
-   const memberDocRef = doc(db, 'teamMembers', lowerEmail);
-   
-   await setDoc(memberDocRef, {
-     ownerUid,
-     name,
-     role: 'member',
-     active: true,
-     addedAt: new Date().toISOString(),
-     addedBy
-   });
- }
-
- public async updateTeamMemberStatus(email: string, active: boolean): Promise<void> {
-   const { db } = initializeFirebaseInstances();
-   if (!db) return;
-   
-   const lowerEmail = email.toLowerCase().trim();
-   const memberDocRef = doc(db, 'teamMembers', lowerEmail);
-   
-   await setDoc(memberDocRef, { active }, { merge: true });
- }
-
- public async removeTeamMember(email: string): Promise<void> {
-   const { db } = initializeFirebaseInstances();
-   if (!db) return;
-   
-   const lowerEmail = email.toLowerCase().trim();
-   const memberDocRef = doc(db, 'teamMembers', lowerEmail);
-   
-   await deleteDoc(memberDocRef);
- }
-
- public subscribeToTeamMembers(ownerUid: string, onUpdate: (members: any[]) => void): () => void {
-   const { db } = initializeFirebaseInstances();
-   if (!db) {
-     onUpdate([]);
-     return () => {};
-   }
-   
-   const q = query(collection(db, 'teamMembers'), where('ownerUid', '==', ownerUid));
-   
-   return onSnapshot(q, (snapshot) => {
-     const members: any[] = [];
-     snapshot.forEach(doc => {
-       members.push({ email: doc.id, ...doc.data() });
-     });
-     onUpdate(members);
-   });
- }
-  /**
-   * Imports leads from an old user UID path (users/{oldUid}/leads) into sharedLeads without duplication.
-   */
-  public async importLeadsFromUserUid(oldUid: string): Promise<number> {
+  public async addTeamMember(email: string, name: string, team: string, role: string): Promise<void> {
     const { db } = initializeFirebaseInstances();
-    if (!db || !oldUid.trim()) return 0;
+    if (!db) return;
 
-    const trimmedOldUid = oldUid.trim();
-    const oldLeadsCol = collection(db, 'users', trimmedOldUid, 'leads');
-    const oldSnap = await getDocs(oldLeadsCol);
+    const lowerEmail = email.toLowerCase().trim();
+    const teamDocRef = doc(db, 'config', 'team');
+    const teamSnap = await getDoc(teamDocRef);
 
-    if (oldSnap.empty) return 0;
+    let members: any[] = [];
+    let adminEmail = 'sobujbd679@gmail.com';
 
-    const currentLeads = this.getLeads();
-    const existingIds = new Set(currentLeads.map(l => l.id));
-    const existingPhones = new Set(currentLeads.map(l => l.phone ? normalizeBdPhoneNumber(l.phone) : '').filter(Boolean));
-    const existingMessengers = new Set(currentLeads.map(l => l.messengerId ? l.messengerId.trim() : '').filter(Boolean));
-
-    let importedCount = 0;
-    const batch = writeBatch(db);
-    const newLeadsToAdd: Lead[] = [];
-
-    oldSnap.forEach((docSnap) => {
-      const data = docSnap.data();
-      const lead = normalizeFirestoreLead(docSnap.id, data);
-
-      const normPhone = lead.phone ? normalizeBdPhoneNumber(lead.phone) : '';
-      const cleanMsgId = lead.messengerId ? lead.messengerId.trim() : '';
-
-      const isDuplicate = 
-        existingIds.has(lead.id) ||
-        (normPhone && existingPhones.has(normPhone)) ||
-        (cleanMsgId && existingMessengers.has(cleanMsgId));
-
-      if (!isDuplicate) {
-        existingIds.add(lead.id);
-        if (normPhone) existingPhones.add(normPhone);
-        if (cleanMsgId) existingMessengers.add(cleanMsgId);
-
-        newLeadsToAdd.push(lead);
-        batch.set(doc(db, 'sharedLeads', lead.id), lead);
-        importedCount++;
-      }
-    });
-
-    if (importedCount > 0) {
-      await batch.commit();
-      const updated = [...newLeadsToAdd, ...currentLeads];
-      this.saveLeads(updated);
+    if (teamSnap.exists()) {
+      const data = teamSnap.data();
+      adminEmail = data.adminEmail || 'sobujbd679@gmail.com';
+      members = Array.isArray(data.members) ? data.members : [];
     }
 
-    return importedCount;
+    const existingIndex = members.findIndex(m => m.email.toLowerCase() === lowerEmail);
+    const newMember = {
+      email: lowerEmail,
+      name: name.trim(),
+      team: team || 'সেলস টিম ১',
+      role: role || 'সেলস',
+      active: true,
+      addedAt: new Date().toISOString()
+    };
+
+    if (existingIndex >= 0) {
+      members[existingIndex] = { ...members[existingIndex], ...newMember };
+    } else {
+      members.push(newMember);
+    }
+
+    const memberEmails = members.filter(m => m.active !== false).map(m => m.email.toLowerCase().trim());
+    await setDoc(teamDocRef, { adminEmail, members, memberEmails }, { merge: true });
   }
+
+  public async updateTeamMemberStatus(email: string, active: boolean): Promise<void> {
+    const { db } = initializeFirebaseInstances();
+    if (!db) return;
+
+    const lowerEmail = email.toLowerCase().trim();
+    const teamDocRef = doc(db, 'config', 'team');
+    const teamSnap = await getDoc(teamDocRef);
+
+    if (!teamSnap.exists()) return;
+    const data = teamSnap.data();
+    let members = Array.isArray(data.members) ? data.members : [];
+
+    members = members.map(m => m.email.toLowerCase() === lowerEmail ? { ...m, active } : m);
+    const memberEmails = members.filter(m => m.active !== false).map(m => m.email.toLowerCase().trim());
+
+    await setDoc(teamDocRef, { members, memberEmails }, { merge: true });
+  }
+
+  public async removeTeamMember(email: string): Promise<void> {
+    const { db } = initializeFirebaseInstances();
+    if (!db) return;
+
+    const lowerEmail = email.toLowerCase().trim();
+    const teamDocRef = doc(db, 'config', 'team');
+    const teamSnap = await getDoc(teamDocRef);
+
+    if (!teamSnap.exists()) return;
+    const data = teamSnap.data();
+    let members = Array.isArray(data.members) ? data.members : [];
+
+    members = members.filter(m => m.email.toLowerCase() !== lowerEmail);
+    const memberEmails = members.filter(m => m.active !== false).map(m => m.email.toLowerCase().trim());
+
+    await setDoc(teamDocRef, { members, memberEmails }, { merge: true });
+  }
+
+  public subscribeToTeamMembers(onUpdate: (members: any[]) => void): () => void;
+  public subscribeToTeamMembers(ownerUid: string, onUpdate: (members: any[]) => void): () => void;
+  public subscribeToTeamMembers(arg1?: any, arg2?: any): () => void {
+    const onUpdate = typeof arg1 === 'function' ? arg1 : arg2;
+    const { db } = initializeFirebaseInstances();
+    if (!db || typeof onUpdate !== 'function') {
+      if (typeof onUpdate === 'function') {
+        onUpdate([]);
+      }
+      return () => {};
+    }
+
+    const teamDocRef = doc(db, 'config', 'team');
+    return onSnapshot(teamDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const members = Array.isArray(data.members) ? data.members : [];
+        onUpdate(members);
+      } else {
+        onUpdate([]);
+      }
+    });
+  }
+  /**
+   * Refreshes leads directly from server using getDocsFromServer
+   */
+  public async refreshFromServer(): Promise<{ count: number; error?: string }> {
+    const { db } = initializeFirebaseInstances();
+    if (!db) return { count: 0, error: 'DB not initialized' };
+    try {
+      const snap = await getDocsFromServer(collection(db, 'sharedLeads'));
+      const leads: Lead[] = [];
+      snap.forEach((docSnap: any) => {
+        try {
+          leads.push(normalizeFirestoreLead(docSnap.id, docSnap.data()));
+        } catch {}
+      });
+      const uid = this.getActiveUserId() || '';
+      if (uid) {
+        this.saveLeads(leads, uid);
+      }
+      return { count: snap.size };
+    } catch (err: any) {
+      console.error('getDocsFromServer error:', err);
+      return { count: 0, error: err?.message || String(err) };
+    }
+  }
+
+  public async importLeadsFromUserUid(oldUid: string): Promise<number> {
+    const { db } = initializeFirebaseInstances();
+    if (!db || !oldUid) return 0;
+    const oldLeadsCol = collection(db, 'users', oldUid, 'leads');
+    const snap = await getDocs(oldLeadsCol);
+    if (snap.empty) return 0;
+
+    const batch = writeBatch(db);
+    let count = 0;
+    snap.forEach((docSnap) => {
+      const data = docSnap.data();
+      const lead = normalizeFirestoreLead(docSnap.id, data);
+      const newRef = doc(db, 'sharedLeads', lead.id);
+      batch.set(newRef, removeUndefined(lead), { merge: true });
+      count++;
+    });
+    await batch.commit();
+    return count;
+  }
+
 }
 
 export const leadService = new LeadService();

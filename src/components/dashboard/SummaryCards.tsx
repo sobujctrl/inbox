@@ -319,8 +319,11 @@ export const SummaryCards: React.FC<SummaryCardsProps> = ({
           <span className="text-[13px] text-[var(--text-secondary)] font-medium">নতুন</span>
         </div>
 
-        <div className="flex items-center justify-end pt-2.5 mt-2.5 border-t border-[var(--border)]">
-          <div className="text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors" aria-label="ক্লিক করে দেখুন">
+        <div className="flex items-center justify-between pt-2.5 mt-2.5 border-t border-[var(--border)]">
+          <span className="text-xs font-semibold text-[var(--text-secondary)] truncate">
+            মোট {toBengaliNumerals(totalCount)}
+          </span>
+          <div className="text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors ml-auto" aria-label="ক্লিক করে দেখুন">
             <ArrowRight className="h-4 w-4" />
           </div>
         </div>

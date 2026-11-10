@@ -17,7 +17,7 @@ import { LeadDetailDrawer } from './components/detail/LeadDetailDrawer';
 import { AddLeadModal } from './components/modals/AddLeadModal';
 import { ResetOptionsModal } from './components/modals/ResetOptionsModal';
 import { Lead, LeadStatus, LeadSource } from './types/lead';
-import { leadService, FirestoreErrorPayload, FirestoreDebugInfo, getDhakaDateString, getDateRangeBoundaries, getMonthKey } from './services/leadService';
+import { leadService, FirestoreErrorPayload, FirestoreDebugInfo, getDhakaDateString, getDateRangeBoundaries, getMonthKey, leadMatchesSource } from './services/leadService';
 import { exportLeadsToCSV } from './utils/formatters';
 import { authService, AdminUser } from './services/authService';
 import { firebaseAuthService, AUTHORIZED_ADMIN_EMAIL } from './services/firebaseAuthService';
@@ -28,7 +28,7 @@ import { CheckCircle2, Sparkles, X, AlertTriangle, Layers, UserX } from 'lucide-
 import { useWorkspace } from './context/WorkspaceContext';
 
 export default function App() {
- const { ownerUid, role, loading: workspaceLoading, error: workspaceError } = useWorkspace();
+ const { ownerUid, role, isAuthorized, loading: workspaceLoading, error: workspaceError } = useWorkspace();
  const isFb = isFirebaseConfigured();
  const mainScrollRef = useRef<HTMLElement>(null);
 
@@ -62,35 +62,6 @@ export default function App() {
        // ignore
      }
    };
-
-  const renderDebugBanner = () => {
-    const loginEmail = currentUser?.email || 'N/A';
-    const dbId = getActiveDatabaseId();
-    const docCount = firestoreDebug?.docCount ?? leads.length;
-    const teamStatus = workspaceError ? 'ব্যর্থ (Error)' : 'সফল (Success)';
-    const userRole = role === 'owner' ? 'অ্যাডমিন/মালিক (Admin)' : 'টিম মেম্বার (Member)';
-    const errInfo = firestoreError ? `[${firestoreError.code}] ${firestoreError.message}` : 'কোনো এরর নেই (No Error)';
-    const filteredCount = filteredLeads.length;
-
-    return (
-      <div className="bg-slate-900 text-slate-100 p-2.5 text-xs font-mono border-b border-slate-700 shadow-inner flex flex-wrap items-center justify-between gap-3 z-[999] w-full shrink-0">
-        <div className="flex items-center gap-4 flex-wrap">
-          <span>📧 ইমেল: <strong className="text-emerald-400">{loginEmail}</strong></span>
-          <span>🗄️ DB ID: <strong className="text-cyan-400">{dbId}</strong></span>
-          <span>📦 SharedLeads docs: <strong className="text-amber-400">{docCount}</strong></span>
-          <span>⚙️ Team/Config: <strong className={workspaceError ? 'text-rose-400' : 'text-emerald-400'}>{teamStatus} ({userRole})</strong></span>
-          <span>🔍 ফিল্টার্ড লিড: <strong className="text-purple-400">{filteredCount}</strong></span>
-        </div>
-        <div>
-          {firestoreError ? (
-            <span className="text-rose-400 font-bold">⚠️ Error: {errInfo}</span>
-          ) : (
-            <span className="text-emerald-400 font-bold">🟢 সচল (No Error)</span>
-          )}
-        </div>
-      </div>
-    );
-  };
 
    applyTheme();
 
@@ -360,37 +331,33 @@ export default function App() {
  }
  }, [isFb]);
 
- // Real-time Firestore onSnapshot per-user subscription (users/{uid}/leads)
- useEffect(() => {
- if (!currentUser || workspaceLoading || workspaceError || !ownerUid) return;
-
- leadService.setWorkspaceOwnerId(ownerUid);
- leadService.setCurrentOperator(currentUser.uid || '', currentUser.name);
-
- const unsubscribe = leadService.subscribeToLeads(
- (updatedLeads, debugInfo) => {
- setLeads(updatedLeads);
- if (debugInfo) {
- setFirestoreDebug(debugInfo);
- }
- setFirestoreError(null); // Clear error on successful sync
- setSelectedLead((prev) => {
- if (!prev) return null;
- return updatedLeads.find((l) => l.id === prev.id) || null;
- });
- },
- (errorPayload, debugInfo) => {
- console.error('Firestore Error in App:', errorPayload);
- setFirestoreError(errorPayload);
- if (debugInfo) {
- setFirestoreDebug(debugInfo);
- }
- },
- ownerUid
- );
-
- return () => unsubscribe();
- }, [ownerUid, currentUser, workspaceLoading, workspaceError, isFb]);
+  // Real-time Firestore onSnapshot per-user subscription (sharedLeads)
+  useEffect(() => {
+    const { db } = initializeFirebaseInstances();
+    const uid = currentUser?.uid;
+    if (!isFirebaseConfigured() || !db || !uid) return;
+    const effectiveUid = ownerUid || uid;
+    leadService.setWorkspaceOwnerId(effectiveUid);
+    leadService.setCurrentOperator(uid, currentUser.name);
+    const unsubscribe = leadService.subscribeToLeads(
+      (updatedLeads, debugInfo) => {
+        setLeads(updatedLeads);
+        if (debugInfo) setFirestoreDebug(debugInfo);
+        setFirestoreError(null);
+        setSelectedLead((prev) => {
+          if (!prev) return null;
+          return updatedLeads.find((l) => l.id === prev.id) || null;
+        });
+      },
+      (errorPayload, debugInfo) => {
+        console.error('Firestore Error in App:', errorPayload);
+        setFirestoreError(errorPayload);
+        if (debugInfo) setFirestoreDebug(debugInfo);
+      },
+      effectiveUid
+    );
+    return () => unsubscribe();
+  }, [currentUser?.uid, ownerUid, isFb]);
 
  // Auth state listener event
  useEffect(() => {
@@ -430,6 +397,9 @@ export default function App() {
  const route = CARD_TYPE_TO_ROUTE[cardType];
  window.location.hash = route;
  setActiveCardPage(cardType);
+ if (cardType !== 'all') {
+   setSelectedMonth('');
+ }
  mainScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
  };
 

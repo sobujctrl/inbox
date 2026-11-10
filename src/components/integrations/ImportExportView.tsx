@@ -555,22 +555,16 @@ export const ImportExportView: React.FC<ImportExportViewProps> = ({
  </div>
  <span className="font-semibold">Firestore কালেকশন পাথ (n8n এর জন্য):</span>
  <div className="mt-1 flex items-center justify-between rounded bg-slate-900 px-2.5 py-1.5 font-mono text-[11px] text-emerald-400">
- <span>users/{currentUser?.uid || '<আপনার_UID>'}/leads</span>
+ <span>sharedLeads</span>
  <button
- onClick={() => {
- navigator.clipboard.writeText(`users/${currentUser?.uid || ''}/leads`);
- onShowToast('পাথ কপি হয়েছে!');
- }}
- className="ml-2 text-[10px] text-blue-400 hover:text-white"
- >
- কপি পাথ
+ onClick={() => { navigator.clipboard.writeText('sharedLeads'); onShowToast('পাথ কপি হয়েছে!'); }} className="ml-2 text-[10px] text-blue-400 hover:text-white">কপি পাথ
  </button>
  </div>
  <p className="mt-1.5 text-[11px] text-[var(--accent)]/80 ">
  * n8n থেকে শুধুমাত্র <code>id, name, phone, source, sources, messengerId</code> ফিল্ড পাঠালেও অ্যাপ নিজ থেকে বাকি সব ফিল্ডের ডিফল্ট মান ধরে ইনবক্সে দেখাবে।
  </p>
  <p className="mt-1 text-[11px] text-indigo-700 font-semibold">
- * Facebook Webhook আসলে পেজের মালিক শনাক্ত করতে n8n-এ Firestore থেকে <code>pageOwners/{'{pageId}'}</code> পড়ে সরাসরি <code>users/{'{uid}'}/leads</code>-এ লিড সেভ করতে পারবেন।
+ * Facebook Webhook আসলে পেজের মালিক শনাক্ত করতে n8n-এ Firestore থেকে <code>pageOwners/{'{pageId}'}</code> পড়ে সরাসরি <code>sharedLeads</code>-এ লিড সেভ করতে পারবেন।
  </p>
  </div>
  <pre className="overflow-x-auto rounded-lg bg-slate-950 p-3 font-mono text-[10px] text-emerald-400 max-h-60">

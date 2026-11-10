@@ -15,7 +15,7 @@ import {
  List,
 } from 'lucide-react';
 import { Lead, LeadStatus, LeadSource } from '../../types/lead';
-import { getDhakaDateString, getDateRangeBoundaries, isLeadNew, leadService, getMonthKey } from '../../services/leadService';
+import { getDhakaDateString, getDateRangeBoundaries, isLeadNew, leadService, getMonthKey, leadMatchesSource } from '../../services/leadService';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { authService } from '../../services/authService';
 import {

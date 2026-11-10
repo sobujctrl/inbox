@@ -456,7 +456,7 @@ export const FacebookPageConnectSection: React.FC<FacebookPageConnectSectionProp
  সংযুক্ত পেজের তালিকা ({toBengaliNumerals(connectedPages.length)} টি)
  </h4>
  <span className="text-[11px] text-[var(--text-secondary)]">
- Firestore: <code className="font-mono text-[10px]">users/{currentUserId || '{uid}'}/pages</code>
+ Firestore: <code className="font-mono text-[10px]">sharedLeads</code>
  </span>
  </div>
 
@@ -558,10 +558,10 @@ export const FacebookPageConnectSection: React.FC<FacebookPageConnectSectionProp
  </p>
  <ul className="list-disc pl-5 space-y-1 text-[11px] font-mono">
  <li>
- <strong>users/{'{uid}'}/pages/{'{pageId}'}</strong>: পেজ নাম এবং Page Access Token (যাতে n8n বা ক্লাউড অটোমেশন পেজের পক্ষে রিপ্লাই করতে পারে)।
+ <strong>sharedLeads</strong>: পেজ নাম এবং Page Access Token (যাতে n8n বা ক্লাউড অটোমেশন পেজের পক্ষে রিপ্লাই করতে পারে)।
  </li>
  <li>
- <strong>pageOwners/{'{pageId}'}</strong>: <code className="bg-[var(--bg-surface)]/80 px-1 py-0.5 rounded">{`{ uid: "${currentUserId || '<আপনার_UID>'}", pageId: "..." }`}</code> — Facebook Webhook থেকে যখন কোনো ইভেন্ট আসবে, n8n শুধুমাত্র এই ডকুমেন্টে কোয়েরি করে কোন ইউজারের পাথে (<code className="bg-[var(--bg-surface)]/80 px-1 py-0.5 rounded">users/{'{uid}'}/leads</code>) লিড সেভ করতে হবে তা তাৎক্ষণিক শনাক্ত করবে।
+ <strong>pageOwners/{'{pageId}'}</strong>: <code className="bg-[var(--bg-surface)]/80 px-1 py-0.5 rounded">{`{ uid: "${currentUserId || '<আপনার_UID>'}", pageId: "..." }`}</code> — Facebook Webhook থেকে যখন কোনো ইভেন্ট আসবে, n8n শুধুমাত্র এই ডকুমেন্টে কোয়েরি করে কোন ইউজারের পাথে (<code className="bg-[var(--bg-surface)]/80 px-1 py-0.5 rounded">sharedLeads</code>) লিড সেভ করতে হবে তা তাৎক্ষণিক শনাক্ত করবে।
  </li>
  </ul>
  </div>

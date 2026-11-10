@@ -195,7 +195,7 @@ export const AdminLoginView: React.FC<AdminLoginViewProps> = ({
  <span>মাল্টি-ইউজার সাপোর্ট সক্রিয়</span>
  </div>
  <p className="text-[11px] text-[var(--text-secondary)] leading-relaxed">
- যেকোনো Google অ্যাকাউন্ট দিয়ে লগইন করতে পারবেন। আপনার লিড ও ডেটা সম্পূর্ণ আলাদা এবং সুরক্ষিত থাকবে (Firestore-এ আপনার নিজের <code>users/{'{uid}'}/leads</code>-এ সংরক্ষিত)।
+ যেকোনো Google অ্যাকাউন্ট দিয়ে লগইন করতে পারবেন। আপনার লিড ও ডেটা সম্পূর্ণ আলাদা এবং সুরক্ষিত থাকবে (Firestore-এ আপনার নিজের <code>sharedLeads</code>-এ সংরক্ষিত)।
  </p>
  </div>
  </div>

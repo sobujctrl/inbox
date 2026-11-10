@@ -45,12 +45,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   themeMode = 'light',
   onToggleTheme,
 }) => {
+  const isSuperAdmin = currentUser?.role === 'super_admin';
   const navItems = [
     { id: 'inbox' as ActiveNavTab, label: 'ইনবক্স', sublabel: 'সব সোর্সের লিড তালিকা', icon: Inbox, badge: stats.totalUnreadNewLeadsCount > 0 ? `${toBengaliNumerals(stats.totalUnreadNewLeadsCount)} নতুন` : undefined },
     { id: 'pipeline' as ActiveNavTab, label: 'পাইপলাইন', sublabel: 'কানবান সেলস বোর্ড', icon: Kanban, badge: stats.totalLeads > 0 ? toBengaliNumerals(stats.totalLeads) : undefined },
     { id: 'reports' as ActiveNavTab, label: 'রিপোর্ট ও অ্যানালিটিক্স', sublabel: 'গ্রাফ ও কনভার্সন চার্ট', icon: BarChart3 },
-    { id: 'integrations' as ActiveNavTab, label: 'ইমপোর্ট ও ইন্টিগ্রেশন', sublabel: 'CSV ও Webhook ইনটেক', icon: Webhook },
-    { id: 'settings' as ActiveNavTab, label: 'সেটিংস', sublabel: 'টিম ও ডেটা ব্যাকআপ', icon: Settings },
+    ...(isSuperAdmin ? [
+      { id: 'integrations' as ActiveNavTab, label: 'ইমপোর্ট ও ইন্টিগ্রেশন', sublabel: 'CSV ও Webhook ইনটেক', icon: Webhook },
+      { id: 'settings' as ActiveNavTab, label: 'সেটিংস', sublabel: 'টিম ও ডেটা ব্যাকআপ', icon: Settings },
+    ] : []),
   ];
 
   const handleNavClick = (tab: ActiveNavTab) => {
@@ -115,7 +118,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--badge-pink-bg)] border border-[var(--badge-pink-border)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--badge-pink-text)]">
               Web {toBengaliNumerals(stats.websiteCount)}
             </span>
+            {stats.manualCount > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-[var(--bg-surface)] border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--text-secondary)]">
+                ম্যানুয়াল {toBengaliNumerals(stats.manualCount)}
+              </span>
+            )}
           </div>
+          <p className="text-[9.5px] text-[var(--text-muted)] mt-2 leading-tight">
+            * একটি লিড একাধিক সোর্সে গণ্য হতে পারে
+          </p>
         </div>
         <div className="border-t border-[var(--border)] p-3 bg-[var(--bg-surface)]">
           <div className="flex items-center justify-between">

@@ -30,6 +30,7 @@ import {
  saveFirebaseConfig,
  isFirebaseConfigured,
  FirebaseClientConfig,
+ initializeFirebaseInstances,
 } from '../../firebase/config';
 import { PRIMARY_ADMIN_EMAIL } from '../../config/authConfig';
 import { FacebookPageConnectSection } from './FacebookPageConnectSection';
@@ -42,6 +43,8 @@ interface SettingsViewProps {
  currentUser?: AdminUser | null;
  showDeleted: boolean;
  onShowDeletedChange: (show: boolean) => void;
+ firestoreDebug?: any;
+ firestoreError?: any;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -51,8 +54,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
  currentUser,
  showDeleted,
  onShowDeletedChange,
+ firestoreDebug,
+ firestoreError,
 }) => {
- const { ownerUid, role } = useWorkspace();
+ const { ownerUid, role, loading: workspaceLoading, error: workspaceError } = useWorkspace();
  const activeUser = currentUser || authService.getCurrentUser();
  
  // Team Members State (Firestore)
@@ -60,6 +65,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
  const [isAddingMember, setIsAddingMember] = useState(false);
  const [newMemberName, setNewMemberName] = useState('');
  const [newMemberEmail, setNewMemberEmail] = useState('');
+ const [newMemberTeam, setNewMemberTeam] = useState('সেলস টিম ১');
+ const [newMemberRole, setNewMemberRole] = useState('সেলস');
 
  // Local tags state (keeping as is for now, but could be moved to Firestore)
  const [tags, setTags] = useState<string[]>(PRESET_TAGS);
@@ -268,7 +275,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
  return (
  <div className="space-y-6 max-w-4xl">
-  {role === 'owner' && (
+  
+{role === 'owner' && (
   <>
   {/* 1. Firebase Integration & Setup Card */}
   <div className="rounded-xl border border-[var(--border)]/80 bg-[var(--bg-surface)] p-5 shadow-2xs ">
@@ -434,36 +442,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
     {isAddingMember && role === 'owner' && (
       <div className="rounded-xl border border-blue-100 bg-blue-50/30 p-4 animate-in slide-in-from-top-2 duration-200">
-        <form onSubmit={handleAddTeamMember} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-[11px] font-bold text-blue-900 mb-1">পুরো নাম</label>
-            <input
-              type="text"
-              required
-              value={newMemberName}
-              onChange={(e) => setNewMemberName(e.target.value)}
-              placeholder="যেমন: রহিম আহমেদ"
-              className="w-full rounded-lg border border-blue-200 bg-[var(--bg-surface)] p-2 text-xs focus:border-blue-500 focus:outline-hidden"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-blue-900 mb-1">জিমেইল অ্যাড্রেস</label>
-            <div className="flex gap-2">
+        <form onSubmit={handleAddTeamMember} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-blue-900 mb-1">পুরো নাম</label>
+              <input
+                type="text"
+                required
+                value={newMemberName}
+                onChange={(e) => setNewMemberName(e.target.value)}
+                placeholder="যেমন: রহিম আহমেদ"
+                className="w-full rounded-lg border border-blue-200 bg-[var(--bg-surface)] p-2 text-xs focus:border-blue-500 focus:outline-hidden"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-blue-900 mb-1">জিমেইল অ্যাড্রেস</label>
               <input
                 type="email"
                 required
                 value={newMemberEmail}
                 onChange={(e) => setNewMemberEmail(e.target.value)}
                 placeholder="rahim@gmail.com"
-                className="flex-1 rounded-lg border border-blue-200 bg-[var(--bg-surface)] p-2 text-xs focus:border-blue-500 focus:outline-hidden"
+                className="w-full rounded-lg border border-blue-200 bg-[var(--bg-surface)] p-2 text-xs focus:border-blue-500 focus:outline-hidden"
               />
-              <button
-                type="submit"
-                className="rounded-lg bg-blue-600 px-4 text-xs font-bold text-white hover:bg-blue-700"
-              >
-                যোগ করুন
-              </button>
             </div>
+            <div>
+              <label className="block text-[11px] font-bold text-blue-900 mb-1">টিম নির্বাচন</label>
+              <select
+                value={newMemberTeam}
+                onChange={(e) => setNewMemberTeam(e.target.value)}
+                className="w-full rounded-lg border border-blue-200 bg-[var(--bg-surface)] p-2 text-xs focus:border-blue-500 focus:outline-hidden font-medium"
+              >
+                <option value="সেলস টিম ১">সেলস টিম ১</option>
+                <option value="সেলস টিম ২">সেলস টিম ২</option>
+                <option value="সেলস টিম ৩">সেলস টিম ৩</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold text-blue-900 mb-1">ভূমিকা / রোল</label>
+              <select
+                value={newMemberRole}
+                onChange={(e) => setNewMemberRole(e.target.value)}
+                className="w-full rounded-lg border border-blue-200 bg-[var(--bg-surface)] p-2 text-xs focus:border-blue-500 focus:outline-hidden font-medium"
+              >
+                <option value="সেলস">সেলস</option>
+                <option value="অ্যাডমিন">অ্যাডমিন</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setIsAddingMember(false)}
+              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+            >
+              বাতিল
+            </button>
+            <button
+              type="submit"
+              className="rounded-lg bg-blue-600 px-5 py-1.5 text-xs font-bold text-white hover:bg-blue-700 shadow-sm"
+            >
+              মেম্বার যোগ করুন
+            </button>
           </div>
         </form>
       </div>

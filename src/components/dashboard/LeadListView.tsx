@@ -17,7 +17,7 @@ import {
  ExternalLink,
 } from 'lucide-react';
 import { Lead, LeadSource, LeadStatus } from '../../types/lead';
-import { FirestoreErrorPayload, FirestoreDebugInfo, getDhakaDateString } from '../../services/leadService';
+import { FirestoreErrorPayload, FirestoreDebugInfo, getDhakaDateString, leadMatchesSource } from '../../services/leadService';
 import { SourceBadge, FacebookIcon, MessengerIcon, WhatsAppIcon, WebsiteIcon, ManualIcon } from '../common/SourceBadge';
 import { StatusBadge } from '../common/StatusBadge';
 import { ChannelBadge, resolveMessageChannel } from '../common/ChannelBadge';
@@ -661,7 +661,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
  ২. কালেকশন পাথ (Path):
  </span>
  <span className="font-bold select-all break-all text-[var(--accent)] ">
- {firestoreDebug?.path || 'users/{uid}/leads'}
+ {firestoreDebug?.path || 'sharedLeads'}
  </span>
  </div>
 
@@ -695,7 +695,7 @@ export const LeadListView: React.FC<LeadListViewProps> = ({
  {/* Note for n8n */}
  <div className="mt-2.5 text-[11px] text-amber-900 flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-amber-200/40 ">
  <span>
- 💡 Firestore ডেটাবেস: <strong className="font-mono">{firestoreDebug?.databaseId || 'ai-studio-unifiedleadinbox-0b829395-84c1-4d8f-be98-a6a6c0d8634d'}</strong> | কালেকশন পাথ: <strong className="font-mono">{firestoreDebug?.path || 'users/{uid}/leads'}</strong>
+ 💡 Firestore ডেটাবেস: <strong className="font-mono">{firestoreDebug?.databaseId || 'ai-studio-unifiedleadinbox-0b829395-84c1-4d8f-be98-a6a6c0d8634d'}</strong> | কালেকশন পাথ: <strong className="font-mono">{firestoreDebug?.path || 'sharedLeads'}</strong>
  </span>
  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
  <span className="h-1.5 w-1.5 rounded-full bg-[var(--success-bg)]0"></span>
